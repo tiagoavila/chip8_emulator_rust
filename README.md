@@ -20,12 +20,3 @@ This project is a CHIP-8 emulator/interpreter written in Rust. CHIP-8 is a simpl
 
 ## ROMs
 Sample CHIP-8 ROMs are included in the `src/files/roms/` directory. You can find more online or create your own.
-
-## Logo
-The project logo is located at `src/files/logo.png` and features Ferris, the Rustacean, playing CHIP-8!
-
-## Contributing
-Contributions are welcome! Feel free to open issues or submit pull requests.
-
-## License
-This project is licensed under the MIT License.
