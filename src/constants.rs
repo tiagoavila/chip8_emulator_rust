@@ -1,0 +1,8 @@
+pub const CHIP8_MEMORY_SIZE: usize = 4096;
+pub const CHIP8_REGISTER_COUNT: usize = 16;
+
+pub const CHIP8_SCREEN_WIDTH: usize = 640;
+pub const CHIP8_SCREEN_HEIGHT: usize = 320;
+pub const SCREEN_SCALE_FACTOR: usize = 10;
+pub const SCREEN_WIDTH: usize = CHIP8_SCREEN_WIDTH * SCREEN_SCALE_FACTOR;
+pub const SCREEN_HEIGHT: usize = CHIP8_SCREEN_HEIGHT * SCREEN_SCALE_FACTOR;
