@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/files/logo.png" alt="CHIP-8 Rust Logo" width="300"/>
+  <img src="files/images/logo.png" alt="CHIP-8 Rust Logo" width="300"/>
 </p>
 
 # CHIP-8 Emulator in Rust
@@ -8,7 +8,7 @@ This project is a CHIP-8 emulator/interpreter written in Rust. CHIP-8 is a simpl
 
 ## Features
 - Accurate CHIP-8 instruction set implementation
-- Loads and runs CHIP-8 ROMs (see `src/files/roms/` for examples)
+- Loads and runs CHIP-8 ROMs (see `files/roms/` for examples)
 - Rust-based for performance and safety
 - Simple graphics and input handling
 
@@ -19,4 +19,4 @@ This project is a CHIP-8 emulator/interpreter written in Rust. CHIP-8 is a simpl
    ```
 
 ## ROMs
-Sample CHIP-8 ROMs are included in the `src/files/roms/` directory. You can find more online or create your own.
+Sample CHIP-8 ROMs are included in the `files/roms/` directory. You can find more online or create your own.
