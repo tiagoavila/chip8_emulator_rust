@@ -11,6 +11,7 @@ pub struct Chip8 {
     pub sound_timer: u8,
     pub v_registers: [u8; CHIP8_REGISTER_COUNT],
     pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
+    needs_redraw: bool,
 }
 
 impl Chip8 {
@@ -24,10 +25,13 @@ impl Chip8 {
             sound_timer: 0,
             v_registers: [0; CHIP8_REGISTER_COUNT],
             screen: Chip8::clear_screen(),
+            needs_redraw: false
         }
     }
 
     pub fn tick(&mut self) {
+        self.needs_redraw = false;
+
         //FETCH
         let op_code = self.fetch();
 
@@ -38,6 +42,7 @@ impl Chip8 {
         self.pc += 2; // Move to the next instruction
     }
 
+    /// Fetch the next opcode (2 bytes) from memory at the current program counter
     pub fn fetch(&mut self) -> u16 {
         let high_byte = self.memory.get(self.pc as usize);
         let low_byte = self.memory.get((self.pc + 1) as usize);
@@ -51,6 +56,7 @@ impl Chip8 {
         0
     }
 
+    /// Decode and execute the given opcode
     pub fn decode_execute(&mut self, op_code: u16) {
         // nnn or addr - A 12-bit value, the lowest 12 bits of the instruction
         // n or nibble - A 4-bit value, the lowest 4 bits of the instruction
@@ -67,9 +73,14 @@ impl Chip8 {
 
             // 00E0 - CLS - Clear screen
             (0, 0, 0xe, 0) => self.screen = Self::clear_screen(),
+            
+            // (0x1, _, _, _) => 
 
-            // 6xnn - vx register = nn
+            // 6xnn - Store number NN in register VX
             (0x6, _, _, _) => self.set_v_register(op_code),
+            
+            // 7xnn - Add the value NN to register VX
+            (0x7, _, _, _) => self.add_value_to_v_register(op_code),
 
             // Annn - set value of i_register to nnn
             (0xa, _, _, _) => self.i_register = op_code & 0x0fff,
@@ -99,20 +110,34 @@ impl Chip8 {
         self.v_registers[v_register_index] = nn;
     }
 
+    fn add_value_to_v_register(&mut self, op_code: u16) {
+        let v_register_index = ((op_code & 0x0f00) >> 8) as usize;
+        let nn = (op_code & 0x00ff) as u8;
+        self.v_registers[v_register_index] += nn;
+    }
+
     // DXYN - Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I
     // Set VF to 1 if any set pixels are changed to unset, and 0 otherwise
+    // Chip-8’s sprites are always 8 pixels wide, but can be a variable number of pixels tall, from 1 to 16.
+    // This is specified in the final digit of the opcode.
     fn draw_sprite_to_screen(&mut self, digits: (u16, u16, u16, u16)) {
-        let x_register = digits.1 as usize;
-        let y_register = digits.2 as usize;
-        let bytes_to_read_count = digits.3 as usize;
+        let vx_register = digits.1 as usize;
+        let vy_register = digits.2 as usize;
+        let sprite_height = digits.3 as usize;
 
-        let x_coord = self.v_registers[x_register] as usize;
-        let y_coord = self.v_registers[y_register] as usize;
+        let x_coord = self.v_registers[vx_register] as usize;
+        let y_coord = self.v_registers[vy_register] as usize;
         let i_register_value = self.i_register as usize;
         let mut pixel_change_to_unset = false;
 
-        for row in i_register_value..(i_register_value + bytes_to_read_count) {
-            let sprite_byte = &self.memory[row];
+        // Loop through each row of the sprite (height determines number of rows)
+        for row in 0..sprite_height {
+            // Read one byte from memory starting at I register + current row offset
+            // Each byte represents 8 pixels (one row of the sprite)
+            let sprite_byte = &self.memory[i_register_value + row];
+            // println!("Sprite byte (row {:2}): {:08b}", row, sprite_byte);
+
+            // Process each of the 8 bits in this byte (8 pixels per row)
             for col in 0..8 {
                 // Extract the current bit from the sprite byte
                 // We start from the most significant bit (bit 7) and work down
@@ -149,5 +174,6 @@ impl Chip8 {
         } else {
             self.v_registers[0xF] = 0;
         }
+        self.needs_redraw = true;
     }
 }
