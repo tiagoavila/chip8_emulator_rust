@@ -6,20 +6,21 @@ use std::{
 
 use minifb::{Key, Window, WindowOptions};
 
-use crate::constants::{CHIP8_SCREEN_HEIGHT, CHIP8_SCREEN_WIDTH};
+use crate::constants::{SCREEN_HEIGHT, SCREEN_SCALE_FACTOR, SCREEN_WIDTH};
 
 mod chip8;
 mod constants;
 
 fn main() {
-    let mut buffer: Vec<u32> = vec![0; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT];
+    let mut buffer: Vec<u32> =
+        vec![0; SCREEN_WIDTH * SCREEN_SCALE_FACTOR * SCREEN_HEIGHT * SCREEN_SCALE_FACTOR];
     let mut chip8 = chip8::Chip8::new();
     let binary = read_rom("files/roms/IBM_Logo.ch8").unwrap();
     chip8.memory[0x200..0x200 + binary.len()].copy_from_slice(&binary);
 
     // 00e0
     chip8.tick();
-    // a22a 
+    // a22a
     chip8.tick();
     // 600c
     chip8.tick();
@@ -28,61 +29,46 @@ fn main() {
     // d01f
     chip8.tick();
 
-    // for byte in &binary {
-    //     print!("{:02x} ", byte);
-    // }
-    // println!();
-
-    // for chunk in binary.chunks(2) {
-    //     print!("{:02x?}", chunk);
-    // }
-    // println!();
-    // let instructions: Vec<u16> = binary
-    //     .chunks(2)
-    //     .map(|chunk| -> u16 {
-    //         match chunk {
-    //             [hi, lo] => u16::from_be_bytes([*hi, *lo]), // Big-endian (CHIP-8 standard)
-    //             [single] => u16::from_be_bytes([0, *single]), // Handle odd length
-    //             _ => 0,
-    //         }
-    //     })
-    //     .collect();
-    let first_instruction = format!("{:04x}", chip8.fetch());
-    chip8.pc += 2;
-    println!("{:04x}", chip8.fetch());
-    println!("{:04b}", chip8.fetch());
-    let second_instruction = chip8.fetch();
-    println!("{:04b}", second_instruction);
-    println!("{:04b}", (second_instruction & 0xF000) >> 12);
-    println!("{:04b}", (second_instruction & 0x0F00) >> 8);
-    println!("{:04b}", (second_instruction & 0x00F0) >> 4);
-    println!("{:04b}", (second_instruction & 0x000F));
-
     let mut window = Window::new(
         "Test - ESC to exit",
-        CHIP8_SCREEN_WIDTH,
-        CHIP8_SCREEN_HEIGHT,
+        SCREEN_WIDTH * SCREEN_SCALE_FACTOR,
+        SCREEN_HEIGHT * SCREEN_SCALE_FACTOR,
         WindowOptions::default(),
     )
     .unwrap_or_else(|e| {
         panic!("{}", e);
     });
 
-    //FETCH
-    //DECODE
-    //EXECUTE
-
     // Limit to max ~60 fps update rate
     window.set_target_fps(60);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        for i in buffer.iter_mut() {
-            *i = 0xFFFFFF; // write something more funny here!
+        // Clear buffer
+        buffer.fill(0x000000);
+
+        for y in 0..SCREEN_HEIGHT {
+            for x in 0..SCREEN_WIDTH {
+                let pixel_on = chip8.screen[y * SCREEN_WIDTH + x];
+                let color = if pixel_on { 0xFFFFFF } else { 0x000000 };
+                // Draw a block of size SCREEN_SCALE_FACTOR x SCREEN_SCALE_FACTOR
+                for dy in 0..SCREEN_SCALE_FACTOR {
+                    for dx in 0..SCREEN_SCALE_FACTOR {
+                        let scaled_x = x * SCREEN_SCALE_FACTOR + dx;
+                        let scaled_y = y * SCREEN_SCALE_FACTOR + dy;
+                        let buffer_index = scaled_y * (SCREEN_WIDTH * SCREEN_SCALE_FACTOR) + scaled_x;
+                        buffer[buffer_index] = color;
+                    }
+                }
+            }
         }
 
         // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
         window
-            .update_with_buffer(&buffer, CHIP8_SCREEN_WIDTH, CHIP8_SCREEN_HEIGHT)
+            .update_with_buffer(
+                &buffer,
+                SCREEN_WIDTH * SCREEN_SCALE_FACTOR,
+                SCREEN_HEIGHT * SCREEN_SCALE_FACTOR,
+            )
             .unwrap();
     }
     //

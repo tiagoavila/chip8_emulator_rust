@@ -1,6 +1,5 @@
 use crate::constants::{
-    CHIP8_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_SCREEN_HEIGHT, CHIP8_SCREEN_WIDTH,
-    START_RAM_ADDRESS,
+    CHIP8_MEMORY_SIZE, CHIP8_REGISTER_COUNT, SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS,
 };
 
 pub struct Chip8 {
@@ -11,7 +10,7 @@ pub struct Chip8 {
     pub delay_timer: u8,
     pub sound_timer: u8,
     pub v_registers: [u8; CHIP8_REGISTER_COUNT],
-    pub screen: [u8; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT],
+    pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
 }
 
 impl Chip8 {
@@ -35,7 +34,7 @@ impl Chip8 {
         //DECODE
         //EXECUTE
         self.decode_execute(op_code);
-        
+
         self.pc += 2; // Move to the next instruction
     }
 
@@ -59,8 +58,8 @@ impl Chip8 {
         // y - A 4-bit value, the upper 4 bits of the low byte of the instruction
         // kk or byte - An 8-bit value, the lowest 8 bits of the instruction
 
-        let digits = Chip8::extract_nibbles(op_code);
-        let (digit1, digit2, digit3, digit4) = digits;
+        let op_digits = Chip8::extract_nibbles(op_code);
+        let (digit1, digit2, digit3, digit4) = op_digits;
 
         match (digit1, digit2, digit3, digit4) {
             // NOP
@@ -76,7 +75,7 @@ impl Chip8 {
             (0xa, _, _, _) => self.i_register = op_code & 0x0fff,
 
             // Dxyn - Draw sprite to screen
-            (0xd, _, _, _) => self.draw_sprite_to_screen(op_code, digits),
+            (0xd, _, _, _) => self.draw_sprite_to_screen(op_digits),
 
             _ => return,
         }
@@ -90,8 +89,8 @@ impl Chip8 {
         (digit1, digit2, digit3, digit4)
     }
 
-    fn clear_screen() -> [u8; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT] {
-        [0; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT]
+    fn clear_screen() -> [bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
+        [false; SCREEN_WIDTH * SCREEN_HEIGHT]
     }
 
     fn set_v_register(&mut self, op_code: u16) {
@@ -101,21 +100,54 @@ impl Chip8 {
     }
 
     // DXYN - Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I
-    // Set VF to 01 if any set pixels are changed to unset, and 00 otherwise
-    fn draw_sprite_to_screen(&mut self, op_code: u16, digits: (u16, u16, u16, u16)) {
-        let x = digits.1 as usize;
-        let y = digits.2 as usize;
-        let n = digits.3 as usize;
+    // Set VF to 1 if any set pixels are changed to unset, and 0 otherwise
+    fn draw_sprite_to_screen(&mut self, digits: (u16, u16, u16, u16)) {
+        let x_register = digits.1 as usize;
+        let y_register = digits.2 as usize;
+        let bytes_to_read_count = digits.3 as usize;
 
-        let x_value = self.v_registers[x];
-        let y_value = self.v_registers[y];
-
+        let x_coord = self.v_registers[x_register] as usize;
+        let y_coord = self.v_registers[y_register] as usize;
         let i_register_value = self.i_register as usize;
-        for row in i_register_value..(i_register_value + n) 
-        {
+        let mut pixel_change_to_unset = false;
+
+        for row in i_register_value..(i_register_value + bytes_to_read_count) {
             let sprite_byte = &self.memory[row];
-            for bit in 0..8 {
+            for col in 0..8 {
+                // Extract the current bit from the sprite byte
+                // We start from the most significant bit (bit 7) and work down
+                // Right shift by (7 - col) to move desired bit to position 0
+                // Then AND with 1 to isolate just that bit (0 or 1)
+                let sprite_pixel = (sprite_byte >> (7 - col)) & 1;
+
+                // If the sprite is positioned so part of it is outside the coordinates of the display,
+                // it wraps around to the opposite side of the screen.
+                let screen_x = (col + x_coord) as usize % SCREEN_WIDTH;
+                let screen_y = (row + y_coord) as usize % SCREEN_HEIGHT;
+
+                // Get the pixel position in the screen as an array (formula: screen_y * SCREEN_WIDTH + screen_x)
+                // This is the index in the screen array where we will set the pixel, example: considering a 64x32 screen:
+                // For screen_y = 0 and screen_x = 0, index = 0
+                // For screen_y = 0 and screen_x = 63, index = 63
+                // For screen_y = 1 and screen_x = 0, index = 64
+                let screen_index = screen_y * SCREEN_WIDTH + screen_x;
+                let old_pixel = self.screen[screen_index];
+
+                // XOR the current value in the screen with true
+                let new_pixel = self.screen[screen_index] ^ (sprite_pixel == 1);
+                self.screen[screen_index] = new_pixel;
+
+                // If the XOR causes any pixels to be erased (set from true to false), VF is set to 1, otherwise it is set to 0
+                if old_pixel == true && new_pixel == false {
+                    pixel_change_to_unset = true;
+                }
             }
+        }
+
+        if pixel_change_to_unset {
+            self.v_registers[0xF] = 1;
+        } else {
+            self.v_registers[0xF] = 0;
         }
     }
 }
