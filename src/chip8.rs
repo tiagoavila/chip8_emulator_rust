@@ -74,7 +74,8 @@ impl Chip8 {
             // 00E0 - CLS - Clear screen
             (0, 0, 0xe, 0) => self.screen = Self::clear_screen(),
             
-            // (0x1, _, _, _) => 
+            // 1nnn - jump to location nnn. The interpreter sets the program counter to nnn.
+            (0x1, _, _, _) => self.jump(op_code),
 
             // 6xnn - Store number NN in register VX
             (0x6, _, _, _) => self.set_v_register(op_code),
@@ -175,5 +176,9 @@ impl Chip8 {
             self.v_registers[0xF] = 0;
         }
         self.needs_redraw = true;
+    }
+    
+    fn jump(&mut self, op_code: u16) {
+        self.pc = op_code & 0x0fff;
     }
 }
