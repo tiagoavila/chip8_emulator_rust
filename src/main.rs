@@ -74,8 +74,6 @@ fn run_normal_mode(buffer: &mut Vec<u32>, chip8: &mut chip8::Chip8, window: &mut
 }
 
 fn run_debug_mode(instruction_count: usize, buffer: &mut Vec<u32>, chip8: &mut chip8::Chip8, window: &mut Window) {
-    chip8.debug_mode = true; 
-
     // Debug mode loop
     let mut space_pressed = false;
 
@@ -89,6 +87,8 @@ fn run_debug_mode(instruction_count: usize, buffer: &mut Vec<u32>, chip8: &mut c
     for _ in 0..instruction_count {
         chip8.tick();
     }
+    
+    chip8.enable_debug_mode(instruction_count);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let space_down = window.is_key_down(Key::Space);
