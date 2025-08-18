@@ -1,5 +1,6 @@
 use crate::constants::{
-    CHIP8_MEMORY_SIZE, CHIP8_REGISTER_COUNT, SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS,
+    CHIP8_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CLEANED_SCREEN, SCREEN_HEIGHT, SCREEN_WIDTH,
+    START_RAM_ADDRESS,
 };
 
 pub struct Chip8 {
@@ -11,7 +12,8 @@ pub struct Chip8 {
     pub sound_timer: u8,
     pub v_registers: [u8; CHIP8_REGISTER_COUNT],
     pub screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
-    needs_redraw: bool,
+    pub needs_redraw: bool,
+    pub debug_mode: bool, // Flag to indicate if the emulator is in debug mode
 }
 
 impl Chip8 {
@@ -24,9 +26,16 @@ impl Chip8 {
             delay_timer: 0,
             sound_timer: 0,
             v_registers: [0; CHIP8_REGISTER_COUNT],
-            screen: Chip8::clear_screen(),
-            needs_redraw: false
+            screen: CLEANED_SCREEN,
+            needs_redraw: false,
+            debug_mode: false,
         }
+    }
+
+    pub fn start(rom_binary: Vec<u8>) -> Self {
+        let mut chip8 = Self::new();
+        chip8.load_rom(rom_binary);
+        return chip8;
     }
 
     pub fn tick(&mut self) {
@@ -34,6 +43,10 @@ impl Chip8 {
 
         //FETCH
         let op_code = self.fetch();
+
+        if self.debug_mode {
+            self.print_instruction(op_code);
+        }
 
         //DECODE
         //EXECUTE
@@ -72,25 +85,34 @@ impl Chip8 {
             (0, 0, 0, 0) => return,
 
             // 00E0 - CLS - Clear screen
-            (0, 0, 0xe, 0) => self.screen = Self::clear_screen(),
-            
+            (0, 0, 0xe, 0) => self.clear_screen(),
+
             // 1nnn - jump to location nnn. The interpreter sets the program counter to nnn.
             (0x1, _, _, _) => self.jump(op_code),
 
             // 6xnn - Store number NN in register VX
             (0x6, _, _, _) => self.set_v_register(op_code),
-            
+
             // 7xnn - Add the value NN to register VX
             (0x7, _, _, _) => self.add_value_to_v_register(op_code),
 
             // Annn - set value of i_register to nnn
-            (0xa, _, _, _) => self.i_register = op_code & 0x0fff,
+            (0xa, _, _, _) => self.set_i_register(op_code),
 
             // Dxyn - Draw sprite to screen
             (0xd, _, _, _) => self.draw_sprite_to_screen(op_digits),
 
             _ => return,
         }
+    }
+
+    fn load_rom(&mut self, rom_binary: Vec<u8>) {
+        let start_ram_address = START_RAM_ADDRESS as usize;
+        self.memory[start_ram_address..(start_ram_address + rom_binary.len())].copy_from_slice(&rom_binary);
+    }
+
+    fn set_i_register(&mut self, op_code: u16) {
+        self.i_register = op_code & 0x0fff
     }
 
     fn extract_nibbles(op_code: u16) -> (u16, u16, u16, u16) {
@@ -101,8 +123,9 @@ impl Chip8 {
         (digit1, digit2, digit3, digit4)
     }
 
-    fn clear_screen() -> [bool; SCREEN_WIDTH * SCREEN_HEIGHT] {
-        [false; SCREEN_WIDTH * SCREEN_HEIGHT]
+    fn clear_screen(&mut self) {
+        self.screen = CLEANED_SCREEN;
+        self.needs_redraw = true;
     }
 
     fn set_v_register(&mut self, op_code: u16) {
@@ -117,7 +140,7 @@ impl Chip8 {
         self.v_registers[v_register_index] += nn;
     }
 
-    // DXYN - Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I
+    // DXYN - Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in the I register
     // Set VF to 1 if any set pixels are changed to unset, and 0 otherwise
     // Chip-8’s sprites are always 8 pixels wide, but can be a variable number of pixels tall, from 1 to 16.
     // This is specified in the final digit of the opcode.
@@ -177,8 +200,29 @@ impl Chip8 {
         }
         self.needs_redraw = true;
     }
-    
+
     fn jump(&mut self, op_code: u16) {
         self.pc = op_code & 0x0fff;
+    }
+    
+    fn print_instruction(&self, op_code: u16) {
+        let (digit1, digit2, digit3, digit4) = Chip8::extract_nibbles(op_code);
+
+        let instruction_desc = match (digit1, digit2, digit3, digit4) {
+            (0, 0, 0, 0) => "NOP - No operation",
+            (0, 0, 0xE, 0) => "CLS - Clear screen",
+            (0, 0, 0xE, 0xE) => "RET - Return from subroutine",
+            (0x1, _, _, _) => "JP addr - Jump to address",
+            (0x6, _, _, _) => "LD Vx, byte - Load byte into register",
+            (0x7, _, _, _) => "ADD Vx, byte - Add byte to register",
+            (0xA, _, _, _) => "LD I, addr - Load address into I register",
+            (0xD, _, _, _) => "DRW Vx, Vy, nibble - Draw sprite",
+            _ => "Unknown instruction",
+        };
+
+        if self.debug_mode {
+            println!("PC: {:04x} - OpCode: {:04x}", self.pc, op_code);
+            println!("Instruction Description: {}", instruction_desc);
+        }
     }
 }
