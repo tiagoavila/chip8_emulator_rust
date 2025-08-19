@@ -1,13 +1,14 @@
 use crate::constants::{
-    CHIP8_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CLEANED_SCREEN, SCREEN_HEIGHT, SCREEN_WIDTH,
-    START_RAM_ADDRESS,
+    CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN,
+    SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS,
 };
 
 pub struct Chip8 {
-    pub memory: [u8; CHIP8_MEMORY_SIZE],
-    pub pc: u16, // Program Counter
-    pub i_register: u16,
-    pub stack: Vec<u16>,
+    pub memory: [u8; CHIP8_RAM_MEMORY_SIZE],
+    pub pc: u16,         // Program Counter
+    pub i_register: u16, // This register is generally used to store memory addresses, so only the lowest (rightmost) 12 bits are usually used
+    pub stack: [u16; CHIP8_STACK_MEMORY_SIZE],
+    pub stack_pointer: usize,
     pub delay_timer: u8,
     pub sound_timer: u8,
     pub v_registers: [u8; CHIP8_REGISTER_COUNT],
@@ -20,10 +21,11 @@ pub struct Chip8 {
 impl Chip8 {
     pub fn new() -> Self {
         Self {
-            memory: [0; CHIP8_MEMORY_SIZE],
+            memory: [0; CHIP8_RAM_MEMORY_SIZE],
             pc: START_RAM_ADDRESS, // Programs start at memory location 0x200
             i_register: 0,
-            stack: Vec::new(),
+            stack: [0; CHIP8_STACK_MEMORY_SIZE],
+            stack_pointer: 0,
             delay_timer: 0,
             sound_timer: 0,
             v_registers: [0; CHIP8_REGISTER_COUNT],
@@ -45,7 +47,6 @@ impl Chip8 {
 
         //FETCH
         let op_code = self.fetch();
-        self.pc += 2; // Move to the next instruction
 
         if self.debug_mode {
             self.print_instruction(op_code);
@@ -54,7 +55,6 @@ impl Chip8 {
         //DECODE
         //EXECUTE
         self.decode_execute(op_code);
-
     }
 
     /// Fetch the next opcode (2 bytes) from memory at the current program counter
@@ -64,6 +64,8 @@ impl Chip8 {
         if high_byte.is_some() && low_byte.is_some() {
             let high_byte = high_byte.unwrap();
             let low_byte = low_byte.unwrap();
+
+            self.pc += 2; // Move to the next instruction
 
             return u16::from_be_bytes([*high_byte, *low_byte]);
         }
@@ -89,15 +91,23 @@ impl Chip8 {
             // 00E0 - CLS - Clear screen
             (0, 0, 0xe, 0) => self.clear_screen(),
 
+            // 00EE - Return from a subroutine.
+            // The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
+            (0, 0, 0xe, 0xe) => self.return_from_subroutine(),
+
             // 1nnn - jump to location nnn. The interpreter sets the program counter to nnn.
             (0x1, _, _, _) => self.jump(op_code),
-            
-            // 3xkk - Skip next instruction if Vx = kk. 
+
+            // 2nnn - Call subroutine at nnn.
+            // The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.
+            (0x2, _, _, _) => self.call_subroutine(op_code),
+
+            // 3xkk - Skip next instruction if Vx = kk.
             // The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
             (0x3, _, _, _) => self.skip_if_equal(digit2, digit3, digit4),
 
             // 4xkk - Skip next instruction if Vx != kk.
-            // The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.            
+            // The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.
             (0x4, _, _, _) => self.skip_if_not_equal(digit2, digit3, digit4),
 
             // 6xnn - Store number NN in register VX
@@ -105,6 +115,14 @@ impl Chip8 {
 
             // 7xnn - Add the value NN to register VX
             (0x7, _, _, _) => self.add_value_to_v_register(op_code),
+
+            // 8xy0 - Set Vx = Vy.
+            // Stores the value of register Vy in register Vx.
+            (0x8, _, _, 0) => self.store_vy_in_vx(digit2, digit3),
+
+            // Set Vx = Vx OR Vy.
+            // Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx. A bitwise OR compares the corrseponding bits from two values, and if either bit is 1, then the same bit in the result is also 1. Otherwise, it is 0.
+            (0x8, _, _, 1) => self.set_vx_with_vx_or_vy(digit2, digit3),
 
             // Annn - set value of i_register to nnn
             (0xa, _, _, _) => self.set_i_register(op_code),
@@ -115,7 +133,7 @@ impl Chip8 {
             _ => return,
         }
     }
-    
+
     pub fn enable_debug_mode(&mut self, instructions_executed: usize) {
         self.debug_mode = true;
         self.instructions_executed = instructions_executed;
@@ -123,7 +141,8 @@ impl Chip8 {
 
     fn load_rom(&mut self, rom_binary: Vec<u8>) {
         let start_ram_address = START_RAM_ADDRESS as usize;
-        self.memory[start_ram_address..(start_ram_address + rom_binary.len())].copy_from_slice(&rom_binary);
+        self.memory[start_ram_address..(start_ram_address + rom_binary.len())]
+            .copy_from_slice(&rom_binary);
     }
 
     fn set_i_register(&mut self, op_code: u16) {
@@ -149,10 +168,15 @@ impl Chip8 {
         self.v_registers[v_register_index] = nn;
     }
 
+    /// 7XNN - Add the value NN to register VX.
+    /// Be aware that once the supplied number is added, if the value of the register exceeds decimal 255
+    /// (the highest possible value that can be stored by an eight bit register),
+    /// the register will wraparound to a corresponding value that can be stored by an eight bit register.
+    /// In other words, the register will always be reduced modulo decimal 256.
     fn add_value_to_v_register(&mut self, op_code: u16) {
         let v_register_index = ((op_code & 0x0f00) >> 8) as usize;
         let nn = (op_code & 0x00ff) as u8;
-        self.v_registers[v_register_index] += nn;
+        self.v_registers[v_register_index] = self.v_registers[v_register_index].wrapping_add(nn);
     }
 
     // DXYN - Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in the I register
@@ -219,46 +243,114 @@ impl Chip8 {
     fn jump(&mut self, op_code: u16) {
         self.pc = op_code & 0x0fff;
     }
-    
+
     fn print_instruction(&mut self, op_code: u16) {
         let (digit1, digit2, digit3, digit4) = Chip8::extract_nibbles(op_code);
 
         let instruction_desc = match (digit1, digit2, digit3, digit4) {
-            (0, 0, 0, 0) => "0nnn - SYS addr\nJump to a machine code routine at nnn. Ignored by modern interpreters.",
+            (0, 0, 0, 0) => {
+                "0nnn - SYS addr\nJump to a machine code routine at nnn. Ignored by modern interpreters."
+            }
             (0, 0, 0xE, 0) => "00E0 - CLS\nClear the display.",
-            (0, 0, 0xE, 0xE) => "00EE - RET\nReturn from a subroutine. The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.",
-            (0x1, _, _, _) => "1nnn - JP addr\nJump to location nnn. The interpreter sets the program counter to nnn.",
-            (0x2, _, _, _) => "2nnn - CALL addr\nCall subroutine at nnn. The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.",
-            (0x3, _, _, _) => "3xkk - SE Vx, byte\nSkip next instruction if Vx = kk. The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.",
-            (0x4, _, _, _) => "4xkk - SNE Vx, byte\nSkip next instruction if Vx != kk. The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.",
-            (0x5, _, _, 0) => "5xy0 - SE Vx, Vy\nSkip next instruction if Vx = Vy. The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.",
-            (0x6, _, _, _) => "6xkk - LD Vx, byte\nSet Vx = kk. The interpreter puts the value kk into register Vx.",
-            (0x7, _, _, _) => "7xkk - ADD Vx, byte\nSet Vx = Vx + kk. Adds the value kk to the value of register Vx, then stores the result in Vx.",
-            (0x8, _, _, 0) => "8xy0 - LD Vx, Vy\nSet Vx = Vy. Stores the value of register Vy in register Vx.",
-            (0x8, _, _, 1) => "8xy1 - OR Vx, Vy\nSet Vx = Vx OR Vy. Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx.",
-            (0x8, _, _, 2) => "8xy2 - AND Vx, Vy\nSet Vx = Vx AND Vy. Performs a bitwise AND on the values of Vx and Vy, then stores the result in Vx.",
-            (0x8, _, _, 3) => "8xy3 - XOR Vx, Vy\nSet Vx = Vx XOR Vy. Performs a bitwise exclusive OR on the values of Vx and Vy, then stores the result in Vx.",
-            (0x8, _, _, 4) => "8xy4 - ADD Vx, Vy\nSet Vx = Vx + Vy, set VF = carry. The values of Vx and Vy are added together. If the result is greater than 8 bits, VF is set to 1, otherwise 0.",
-            (0x8, _, _, 5) => "8xy5 - SUB Vx, Vy\nSet Vx = Vx - Vy, set VF = NOT borrow. If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx.",
-            (0x8, _, _, 6) => "8xy6 - SHR Vx\nSet Vx = Vx SHR 1. If the least-significant bit of Vx is 1, then VF is set to 1, otherwise 0. Then Vx is divided by 2.",
-            (0x8, _, _, 7) => "8xy7 - SUBN Vx, Vy\nSet Vx = Vy - Vx, set VF = NOT borrow. If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx is subtracted from Vy, and the results stored in Vx.",
-            (0x8, _, _, 0xE) => "8xyE - SHL Vx\nSet Vx = Vx SHL 1. If the most-significant bit of Vx is 1, then VF is set to 1, otherwise to 0. Then Vx is multiplied by 2.",
-            (0x9, _, _, 0) => "9xy0 - SNE Vx, Vy\nSkip next instruction if Vx != Vy. The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.",
-            (0xA, _, _, _) => "Annn - LD I, addr\nSet I = nnn. The value of register I is set to nnn.",
-            (0xB, _, _, _) => "Bnnn - JP V0, addr\nJump to location nnn + V0. The program counter is set to nnn plus the value of V0.",
-            (0xC, _, _, _) => "Cxkk - RND Vx, byte\nSet Vx = random byte AND kk. The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk.",
-            (0xD, _, _, _) => "Dxyn - DRW Vx, Vy, nibble\nDisplay n-byte sprite starting at memory location I at (Vx, Vy). Sprites are XORed onto the existing screen.",
-            (0xE, _, 9, 0xE) => "Ex9E - SKP Vx\nSkip next instruction if key with the value of Vx is pressed. Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.",
-            (0xE, _, 0xA, 1) => "ExA1 - SKNP Vx\nSkip next instruction if key with the value of Vx is not pressed. Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.",
-            (0xF, _, 0, 7) => "Fx07 - LD Vx, DT\nSet Vx = delay timer value. The value of DT is placed into Vx.",
-            (0xF, _, 0, 0xA) => "Fx0A - LD Vx, K\nWait for a key press, store the value of the key in Vx. All execution stops until a key is pressed, then the value of that key is stored in Vx.",
-            (0xF, _, 1, 5) => "Fx15 - LD DT, Vx\nSet delay timer = Vx. DT is set equal to the value of Vx.",
-            (0xF, _, 1, 8) => "Fx18 - LD ST, Vx\nSet sound timer = Vx. ST is set equal to the value of Vx.",
-            (0xF, _, 1, 0xE) => "Fx1E - ADD I, Vx\nSet I = I + Vx. The values of I and Vx are added, and the results are stored in I.",
-            (0xF, _, 2, 9) => "Fx29 - LD F, Vx\nSet I = location of sprite for digit Vx. The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx.",
-            (0xF, _, 3, 3) => "Fx33 - LD B, Vx\nStore BCD representation of Vx in memory locations I, I+1, and I+2. The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.",
-            (0xF, _, 5, 5) => "Fx55 - LD [I], Vx\nStore registers V0 through Vx in memory starting at location I. The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.",
-            (0xF, _, 6, 5) => "Fx65 - LD Vx, [I]\nRead registers V0 through Vx from memory starting at location I. The interpreter reads values from memory starting at location I into registers V0 through Vx.",
+            (0, 0, 0xE, 0xE) => {
+                "00EE - RET\nReturn from a subroutine. The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer."
+            }
+            (0x1, _, _, _) => {
+                "1nnn - JP addr\nJump to location nnn. The interpreter sets the program counter to nnn."
+            }
+            (0x2, _, _, _) => {
+                "2nnn - CALL addr\nCall subroutine at nnn. The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn."
+            }
+            (0x3, _, _, _) => {
+                "3xkk - SE Vx, byte\nSkip next instruction if Vx = kk. The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2."
+            }
+            (0x4, _, _, _) => {
+                "4xkk - SNE Vx, byte\nSkip next instruction if Vx != kk. The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2."
+            }
+            (0x5, _, _, 0) => {
+                "5xy0 - SE Vx, Vy\nSkip next instruction if Vx = Vy. The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2."
+            }
+            (0x6, _, _, _) => {
+                "6xkk - LD Vx, byte\nSet Vx = kk. The interpreter puts the value kk into register Vx."
+            }
+            (0x7, _, _, _) => {
+                "7xkk - ADD Vx, byte\nSet Vx = Vx + kk. Adds the value kk to the value of register Vx, then stores the result in Vx."
+            }
+            (0x8, _, _, 0) => {
+                "8xy0 - LD Vx, Vy\nSet Vx = Vy. Stores the value of register Vy in register Vx."
+            }
+            (0x8, _, _, 1) => {
+                "8xy1 - OR Vx, Vy\nSet Vx = Vx OR Vy. Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx."
+            }
+            (0x8, _, _, 2) => {
+                "8xy2 - AND Vx, Vy\nSet Vx = Vx AND Vy. Performs a bitwise AND on the values of Vx and Vy, then stores the result in Vx."
+            }
+            (0x8, _, _, 3) => {
+                "8xy3 - XOR Vx, Vy\nSet Vx = Vx XOR Vy. Performs a bitwise exclusive OR on the values of Vx and Vy, then stores the result in Vx."
+            }
+            (0x8, _, _, 4) => {
+                "8xy4 - ADD Vx, Vy\nSet Vx = Vx + Vy, set VF = carry. The values of Vx and Vy are added together. If the result is greater than 8 bits, VF is set to 1, otherwise 0."
+            }
+            (0x8, _, _, 5) => {
+                "8xy5 - SUB Vx, Vy\nSet Vx = Vx - Vy, set VF = NOT borrow. If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx."
+            }
+            (0x8, _, _, 6) => {
+                "8xy6 - SHR Vx\nSet Vx = Vx SHR 1. If the least-significant bit of Vx is 1, then VF is set to 1, otherwise 0. Then Vx is divided by 2."
+            }
+            (0x8, _, _, 7) => {
+                "8xy7 - SUBN Vx, Vy\nSet Vx = Vy - Vx, set VF = NOT borrow. If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx is subtracted from Vy, and the results stored in Vx."
+            }
+            (0x8, _, _, 0xE) => {
+                "8xyE - SHL Vx\nSet Vx = Vx SHL 1. If the most-significant bit of Vx is 1, then VF is set to 1, otherwise to 0. Then Vx is multiplied by 2."
+            }
+            (0x9, _, _, 0) => {
+                "9xy0 - SNE Vx, Vy\nSkip next instruction if Vx != Vy. The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2."
+            }
+            (0xA, _, _, _) => {
+                "Annn - LD I, addr\nSet I = nnn. The value of register I is set to nnn."
+            }
+            (0xB, _, _, _) => {
+                "Bnnn - JP V0, addr\nJump to location nnn + V0. The program counter is set to nnn plus the value of V0."
+            }
+            (0xC, _, _, _) => {
+                "Cxkk - RND Vx, byte\nSet Vx = random byte AND kk. The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk."
+            }
+            (0xD, _, _, _) => {
+                "Dxyn - DRW Vx, Vy, nibble\nDisplay n-byte sprite starting at memory location I at (Vx, Vy). Sprites are XORed onto the existing screen."
+            }
+            (0xE, _, 9, 0xE) => {
+                "Ex9E - SKP Vx\nSkip next instruction if key with the value of Vx is pressed. Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2."
+            }
+            (0xE, _, 0xA, 1) => {
+                "ExA1 - SKNP Vx\nSkip next instruction if key with the value of Vx is not pressed. Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2."
+            }
+            (0xF, _, 0, 7) => {
+                "Fx07 - LD Vx, DT\nSet Vx = delay timer value. The value of DT is placed into Vx."
+            }
+            (0xF, _, 0, 0xA) => {
+                "Fx0A - LD Vx, K\nWait for a key press, store the value of the key in Vx. All execution stops until a key is pressed, then the value of that key is stored in Vx."
+            }
+            (0xF, _, 1, 5) => {
+                "Fx15 - LD DT, Vx\nSet delay timer = Vx. DT is set equal to the value of Vx."
+            }
+            (0xF, _, 1, 8) => {
+                "Fx18 - LD ST, Vx\nSet sound timer = Vx. ST is set equal to the value of Vx."
+            }
+            (0xF, _, 1, 0xE) => {
+                "Fx1E - ADD I, Vx\nSet I = I + Vx. The values of I and Vx are added, and the results are stored in I."
+            }
+            (0xF, _, 2, 9) => {
+                "Fx29 - LD F, Vx\nSet I = location of sprite for digit Vx. The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx."
+            }
+            (0xF, _, 3, 3) => {
+                "Fx33 - LD B, Vx\nStore BCD representation of Vx in memory locations I, I+1, and I+2. The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2."
+            }
+            (0xF, _, 5, 5) => {
+                "Fx55 - LD [I], Vx\nStore registers V0 through Vx in memory starting at location I. The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I."
+            }
+            (0xF, _, 6, 5) => {
+                "Fx65 - LD Vx, [I]\nRead registers V0 through Vx from memory starting at location I. The interpreter reads values from memory starting at location I into registers V0 through Vx."
+            }
             _ => "Unknown instruction",
         };
 
@@ -269,7 +361,6 @@ impl Chip8 {
         println!("-----------------------------------------------------");
         self.instructions_executed += 1;
     }
-    
 
     /// Skip next instruction if Vx = kk.
     /// The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
@@ -286,12 +377,12 @@ impl Chip8 {
     /// If they are equal, the program counter (PC) is incremented by 2 to skip the next instruction.
     fn skip_if_equal(&mut self, x: u16, k1: u16, k2: u16) {
         let v_register_value = self.v_registers[x as usize];
-        let kk: u8 = ( (k1 << 4) | k2 ) as u8;
+        let kk: u8 = ((k1 << 4) | k2) as u8;
         if v_register_value == kk {
             self.pc += 2;
         }
     }
-    
+
     /// Skip next instruction if Vx != kk.
     /// The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.
     ///
@@ -307,9 +398,46 @@ impl Chip8 {
     /// If they are not equal, the program counter (PC) is incremented by 2 to skip the next instruction.
     fn skip_if_not_equal(&mut self, x: u16, k1: u16, k2: u16) {
         let v_register_value = self.v_registers[x as usize];
-        let kk: u8 = ( (k1 << 4) | k2 ) as u8;
+        let kk: u8 = ((k1 << 4) | k2) as u8;
         if v_register_value != kk {
             self.pc += 2;
         }
+    }
+
+    /// 2nnn - CALL addr
+    /// Call subroutine at nnn.
+    /// The interpreter puts the current PC on the top of the stack and increments the stack pointer. The PC is then set to nnn.
+    fn call_subroutine(&mut self, op_code: u16) {
+        self.stack[self.stack_pointer] = self.pc;
+        self.stack_pointer += 1;
+        self.pc = op_code & 0x0fff;
+    }
+
+    /// 00EE - Return from a subroutine.
+    /// The interpreter subtracts 1 from the stack pointer and sets the program counter to the address at the top of the stack.
+    fn return_from_subroutine(&mut self) {
+        self.stack_pointer -= 1;
+        self.pc = self.stack[self.stack_pointer];
+    }
+
+    /// 8xy0 - LD Vx, Vy.
+    /// Set Vx = Vy.
+    /// Stores the value of register Vy in register Vx.
+    /// # Arguments
+    ///
+    /// * `x` - The index of the Vx register to store the value in.
+    /// * `y` - The index of the Vy register to read the value from.
+    fn store_vy_in_vx(&mut self, x: u16, y: u16) {
+        self.v_registers[x as usize] = self.v_registers[y as usize];
+    }
+
+    /// 8xy1 - OR Vx, Vy.
+    /// Set Vx = Vx OR Vy.
+    /// Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx.
+    /// A bitwise OR compares the corrseponding bits from two values, and if either bit is 1,
+    /// then the same bit in the result is also 1. Otherwise, it is 0.
+    /// The | operator compares each bit of the left and right operands.
+    fn set_vx_with_vx_or_vy(&mut self, x: u16, y: u16) {
+        self.v_registers[x as usize] |= self.v_registers[y as usize];
     }
 }

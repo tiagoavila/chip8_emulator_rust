@@ -1,4 +1,5 @@
-pub const CHIP8_MEMORY_SIZE: usize = 4096;
+pub const CHIP8_RAM_MEMORY_SIZE: usize = 4096;
+pub const CHIP8_STACK_MEMORY_SIZE: usize = 16;
 pub const CHIP8_REGISTER_COUNT: usize = 16;
 
 pub const SCREEN_WIDTH: usize = 64;

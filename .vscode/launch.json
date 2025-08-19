@@ -40,6 +40,27 @@
             },
             "args": [],
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'chip8_emulator_rust' with instruction_count 40",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--",
+                    "--debug",
+                    "--instruction_count",
+                    "40"
+                ],
+                "filter": {
+                    "name": "chip8_emulator_rust",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "stdio": null
         }
     ]
 }
