@@ -85,49 +85,40 @@ impl Chip8 {
         let (digit1, digit2, digit3, digit4) = op_digits;
 
         match (digit1, digit2, digit3, digit4) {
-            // NOP
             (0, 0, 0, 0) => return,
 
-            // 00E0 - CLS - Clear screen
             (0, 0, 0xe, 0) => self.clear_screen(),
 
-            // 00EE - Return from a subroutine.
-            // The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
             (0, 0, 0xe, 0xe) => self.return_from_subroutine(),
 
-            // 1nnn - jump to location nnn. The interpreter sets the program counter to nnn.
             (0x1, _, _, _) => self.jump(op_code),
 
-            // 2nnn - Call subroutine at nnn.
-            // The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.
             (0x2, _, _, _) => self.call_subroutine(op_code),
 
-            // 3xkk - Skip next instruction if Vx = kk.
-            // The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
             (0x3, _, _, _) => self.skip_if_equal(digit2, digit3, digit4),
 
-            // 4xkk - Skip next instruction if Vx != kk.
-            // The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.
             (0x4, _, _, _) => self.skip_if_not_equal(digit2, digit3, digit4),
 
-            // 6xnn - Store number NN in register VX
             (0x6, _, _, _) => self.set_v_register(op_code),
 
-            // 7xnn - Add the value NN to register VX
             (0x7, _, _, _) => self.add_value_to_v_register(op_code),
 
-            // 8xy0 - Set Vx = Vy.
-            // Stores the value of register Vy in register Vx.
             (0x8, _, _, 0) => self.store_vy_in_vx(digit2, digit3),
 
-            // Set Vx = Vx OR Vy.
-            // Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx. A bitwise OR compares the corrseponding bits from two values, and if either bit is 1, then the same bit in the result is also 1. Otherwise, it is 0.
             (0x8, _, _, 1) => self.set_vx_with_vx_or_vy(digit2, digit3),
 
-            // Annn - set value of i_register to nnn
+            (0x8, _, _, 2) => self.set_vx_with_vx_and_vy(digit2, digit3),
+
+            (0x8, _, _, 3) => self.set_vx_with_vx_xor_vy(digit2, digit3),
+
+            (0x8, _, _, 4) => self.add_vx_with_vy(digit2, digit3),
+
+            (0x8, _, _, 5) => self.subtract_vx_with_vy(digit2, digit3),
+
+            (0x8, _, _, 6) => self.shr_vx(digit2),
+
             (0xa, _, _, _) => self.set_i_register(op_code),
 
-            // Dxyn - Draw sprite to screen
             (0xd, _, _, _) => self.draw_sprite_to_screen(op_digits),
 
             _ => return,
@@ -439,5 +430,67 @@ impl Chip8 {
     /// The | operator compares each bit of the left and right operands.
     fn set_vx_with_vx_or_vy(&mut self, x: u16, y: u16) {
         self.v_registers[x as usize] |= self.v_registers[y as usize];
+    }
+
+    /// 8xy2 - AND Vx, Vy
+    /// Set Vx = Vx AND Vy.
+    /// Performs a bitwise AND on the values of Vx and Vy, then stores the result in Vx.
+    /// A bitwise AND compares the corrseponding bits from two values, and if both bits are 1,
+    /// then the same bit in the result is also 1. Otherwise, it is 0.
+    fn set_vx_with_vx_and_vy(&mut self, x: u16, y: u16) {
+        self.v_registers[x as usize] &= self.v_registers[y as usize];
+    }
+
+    /// 8xy3 - XOR Vx, Vy
+    /// Set Vx = Vx XOR Vy.
+    /// Performs a bitwise exclusive OR on the values of Vx and Vy, then stores the result in Vx.
+    /// An exclusive OR compares the corrseponding bits from two values, and if the bits are not both the same,
+    /// then the corresponding bit in the result is set to 1. Otherwise, it is 0.
+    fn set_vx_with_vx_xor_vy(&mut self, x: u16, y: u16) {
+        self.v_registers[x as usize] ^= self.v_registers[y as usize];
+    }
+
+    /// 8xy4 - ADD Vx, Vy
+    /// Set Vx = Vx + Vy, set VF = carry.
+    /// The values of Vx and Vy are added together. If the result is greater than 8 bits (i.e., > 255,)
+    /// VF is set to 1, otherwise 0. Only the lowest 8 bits of the result are kept, and stored in Vx.
+    fn add_vx_with_vy(&mut self, x: u16, y: u16) {
+        let vx = self.v_registers[x as usize];
+        let vy = self.v_registers[y as usize];
+
+        let (result, overflowed) = vx.overflowing_add(vy);
+
+        self.v_registers[x as usize] = result;
+
+        if overflowed {
+            self.v_registers[0xF] = 1;
+        } else {
+            self.v_registers[0xF] = 0;
+        }
+    }
+
+    /// 8xy5 - SUB Vx, Vy
+    /// Set Vx = Vx - Vy, set VF = NOT borrow.
+    /// If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx.
+    fn subtract_vx_with_vy(&mut self, x: u16, y: u16) {
+        let vx = self.v_registers[x as usize];
+        let vy = self.v_registers[y as usize];
+
+        if vx > vy {
+            self.v_registers[0xF] = 1;
+        } else {
+            self.v_registers[0xF] = 0;
+        }
+
+        self.v_registers[x as usize] = vx.wrapping_sub(vy);
+    }
+
+    /// 8xy6 - SHR Vx {, Vy}
+    /// Set Vx = Vx SHR 1.
+    /// If the least-significant bit of Vx is 1, then VF is set to 1, otherwise 0. Then Vx is divided by 2.
+    fn shr_vx(&mut self, x: u16) {
+        self.v_registers[0xF] = self.v_registers[x as usize] & 0x01;
+
+        self.v_registers[x as usize] >>= 1;
     }
 }
