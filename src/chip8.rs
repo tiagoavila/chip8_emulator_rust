@@ -88,10 +88,12 @@ impl Chip8 {
             (0, 0, 0, 0) => return,
             (0, 0, 0xe, 0) => self.clear_screen(),
             (0, 0, 0xe, 0xe) => self.return_from_subroutine(),
+            (0, _, _, _) => self.sys_addr(op_code),
             (0x1, _, _, _) => self.jump(op_code),
             (0x2, _, _, _) => self.call_subroutine(op_code),
             (0x3, _, _, _) => self.skip_if_equal(digit2, digit3, digit4),
-            (0x4, _, _, _) => self.skip_if_not_equal(digit2, digit3, digit4),
+            (0x4, _, _, _) => self.skip_if_vx_not_eq_kk(digit2, digit3, digit4),
+            (0x5, _, _, 0) => self.skip_if_vx_eq_vy(digit2, digit3),
             (0x6, _, _, _) => self.set_v_register(op_code),
             (0x7, _, _, _) => self.add_value_to_v_register(op_code),
             (0x8, _, _, 0) => self.store_vy_in_vx(digit2, digit3),
@@ -103,13 +105,22 @@ impl Chip8 {
             (0x8, _, _, 6) => self.shr_vx(digit2),
             (0x8, _, _, 7) => self.subtract_vx_from_vy(digit2, digit3),
             (0x8, _, _, 0xe) => self.shl_vx(digit2),
+            (0x9, _, _, 0) => self.skip_if_vx_ne_vy(digit2, digit3),
             (0xa, _, _, _) => self.set_i_register(op_code),
+            (0xb, _, _, _) => self.jump_v0_addr(op_code),
+            (0xc, _, _, _) => self.rnd_vx_byte(digit2, ((digit3 << 4) | digit4) as u8),
             (0xd, _, _, _) => self.draw_sprite_to_screen(op_digits),
-            (0xf, _, 0x1, 0xe) => self.add_vx_to_i(digit2),
-            (0xf, _, 0x3, 0x3) => self.store_bcd_of_vx_in_memory(digit2),
-            (0xf, _, 0x5, 0x5) => self.fill_memory_with_v0_to_vx(digit2),
-            (0xf, _, 0x6, 0x5) => self.fill_v0_to_vx_starting_at_i(digit2),
-
+            (0xe, _, 9, 0xe) => self.skp_vx(digit2),
+            (0xe, _, 0xa, 1) => self.sknp_vx(digit2),
+            (0xf, _, 0, 7) => self.ld_vx_dt(digit2),
+            (0xf, _, 0, 0xa) => self.ld_vx_k(digit2),
+            (0xf, _, 1, 5) => self.ld_dt_vx(digit2),
+            (0xf, _, 1, 8) => self.ld_st_vx(digit2),
+            (0xf, _, 1, 0xe) => self.add_vx_to_i(digit2),
+            (0xf, _, 2, 9) => self.ld_f_vx(digit2),
+            (0xf, _, 3, 3) => self.store_bcd_of_vx_in_memory(digit2),
+            (0xf, _, 5, 5) => self.fill_memory_with_v0_to_vx(digit2),
+            (0xf, _, 6, 5) => self.fill_v0_to_vx_starting_at_i(digit2),
             _ => return,
         }
     }
@@ -376,7 +387,7 @@ impl Chip8 {
     ///
     /// Combines `k1` and `k2` into an 8-bit value (kk) and compares it with the value in the Vx register.
     /// If they are not equal, the program counter (PC) is incremented by 2 to skip the next instruction.
-    fn skip_if_not_equal(&mut self, x: u16, k1: u16, k2: u16) {
+    fn skip_if_vx_not_eq_kk(&mut self, x: u16, k1: u16, k2: u16) {
         let v_register_value = self.v_registers[x as usize];
         let kk: u8 = ((k1 << 4) | k2) as u8;
         if v_register_value != kk {
@@ -566,6 +577,88 @@ impl Chip8 {
         }
 
         self.i_register += x + 1;
+    }
+
+    /// 0nnn - SYS addr
+    /// Jump to a machine code routine at nnn. Ignored by most modern interpreters.
+    fn sys_addr(&mut self, _op_code: u16) {
+        unimplemented!("SYS addr (0nnn) is not implemented");
+    }
+
+    /// 5xy0 - SE Vx, Vy
+    /// Skip next instruction if Vx = Vy.
+    /// The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.
+    fn skip_if_vx_eq_vy(&mut self, x: u16, y: u16) {
+        let vx = self.v_registers[x as usize];
+        let vy = self.v_registers[y as usize];
+        if vx == vy {
+            self.pc += 2;
+        }
+    }
+
+    /// 9xy0 - SNE Vx, Vy
+    /// Skip next instruction if Vx != Vy.
+    /// The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.    
+    fn skip_if_vx_ne_vy(&mut self, x: u16, y: u16) {
+        let vx = self.v_registers[x as usize];
+        let vy = self.v_registers[y as usize];
+        if vx != vy {
+            self.pc += 2;
+        }
+    }
+
+    /// Bnnn - JP V0, addr
+    /// Jump to location nnn + V0.
+    fn jump_v0_addr(&mut self, _op_code: u16) {
+        unimplemented!("JP V0, addr (Bnnn) is not implemented");
+    }
+
+    /// Cxkk - RND Vx, byte
+    /// Set Vx = random byte AND kk.
+    fn rnd_vx_byte(&mut self, _x: u16, _kk: u8) {
+        unimplemented!("RND Vx, byte (Cxkk) is not implemented");
+    }
+
+    /// Ex9E - SKP Vx
+    /// Skip next instruction if key with the value of Vx is pressed.
+    fn skp_vx(&mut self, _x: u16) {
+        unimplemented!("SKP Vx (Ex9E) is not implemented");
+    }
+
+    /// ExA1 - SKNP Vx
+    /// Skip next instruction if key with the value of Vx is not pressed.
+    fn sknp_vx(&mut self, _x: u16) {
+        unimplemented!("SKNP Vx (ExA1) is not implemented");
+    }
+
+    /// Fx07 - LD Vx, DT
+    /// Set Vx = delay timer value.
+    fn ld_vx_dt(&mut self, _x: u16) {
+        unimplemented!("LD Vx, DT (Fx07) is not implemented");
+    }
+
+    /// Fx0A - LD Vx, K
+    /// Wait for a key press, store the value of the key in Vx.
+    fn ld_vx_k(&mut self, _x: u16) {
+        unimplemented!("LD Vx, K (Fx0A) is not implemented");
+    }
+
+    /// Fx15 - LD DT, Vx
+    /// Set delay timer = Vx.
+    fn ld_dt_vx(&mut self, _x: u16) {
+        unimplemented!("LD DT, Vx (Fx15) is not implemented");
+    }
+
+    /// Fx18 - LD ST, Vx
+    /// Set sound timer = Vx.
+    fn ld_st_vx(&mut self, _x: u16) {
+        unimplemented!("LD ST, Vx (Fx18) is not implemented");
+    }
+
+    /// Fx29 - LD F, Vx
+    /// Set I = location of sprite for digit Vx.
+    fn ld_f_vx(&mut self, _x: u16) {
+        unimplemented!("LD F, Vx (Fx29) is not implemented");
     }
 
     /// Extracts the decimal digits of a number in order (most to least significant).
