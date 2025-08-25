@@ -4,7 +4,7 @@ use crate::constants::{
 };
 
 pub struct Chip8 {
-    pub memory: [u8; CHIP8_RAM_MEMORY_SIZE],
+    pub ram: [u8; CHIP8_RAM_MEMORY_SIZE],
     pub pc: u16,         // Program Counter
     pub i_register: u16, // This register is generally used to store memory addresses, so only the lowest (rightmost) 12 bits are usually used
     pub stack: [u16; CHIP8_STACK_MEMORY_SIZE],
@@ -21,7 +21,7 @@ pub struct Chip8 {
 impl Chip8 {
     pub fn new() -> Self {
         Self {
-            memory: [0; CHIP8_RAM_MEMORY_SIZE],
+            ram: [0; CHIP8_RAM_MEMORY_SIZE],
             pc: START_RAM_ADDRESS, // Programs start at memory location 0x200
             i_register: 0,
             stack: [0; CHIP8_STACK_MEMORY_SIZE],
@@ -59,8 +59,8 @@ impl Chip8 {
 
     /// Fetch the next opcode (2 bytes) from memory at the current program counter
     pub fn fetch(&mut self) -> u16 {
-        let high_byte = self.memory.get(self.pc as usize);
-        let low_byte = self.memory.get((self.pc + 1) as usize);
+        let high_byte = self.ram.get(self.pc as usize);
+        let low_byte = self.ram.get((self.pc + 1) as usize);
         if high_byte.is_some() && low_byte.is_some() {
             let high_byte = high_byte.unwrap();
             let low_byte = low_byte.unwrap();
@@ -86,40 +86,29 @@ impl Chip8 {
 
         match (digit1, digit2, digit3, digit4) {
             (0, 0, 0, 0) => return,
-
             (0, 0, 0xe, 0) => self.clear_screen(),
-
             (0, 0, 0xe, 0xe) => self.return_from_subroutine(),
-
             (0x1, _, _, _) => self.jump(op_code),
-
             (0x2, _, _, _) => self.call_subroutine(op_code),
-
             (0x3, _, _, _) => self.skip_if_equal(digit2, digit3, digit4),
-
             (0x4, _, _, _) => self.skip_if_not_equal(digit2, digit3, digit4),
-
             (0x6, _, _, _) => self.set_v_register(op_code),
-
             (0x7, _, _, _) => self.add_value_to_v_register(op_code),
-
             (0x8, _, _, 0) => self.store_vy_in_vx(digit2, digit3),
-
             (0x8, _, _, 1) => self.set_vx_with_vx_or_vy(digit2, digit3),
-
             (0x8, _, _, 2) => self.set_vx_with_vx_and_vy(digit2, digit3),
-
             (0x8, _, _, 3) => self.set_vx_with_vx_xor_vy(digit2, digit3),
-
             (0x8, _, _, 4) => self.add_vx_with_vy(digit2, digit3),
-
-            (0x8, _, _, 5) => self.subtract_vx_with_vy(digit2, digit3),
-
+            (0x8, _, _, 5) => self.subtract_vy_from_vx(digit2, digit3),
             (0x8, _, _, 6) => self.shr_vx(digit2),
-
+            (0x8, _, _, 7) => self.subtract_vx_from_vy(digit2, digit3),
+            (0x8, _, _, 0xe) => self.shl_vx(digit2),
             (0xa, _, _, _) => self.set_i_register(op_code),
-
             (0xd, _, _, _) => self.draw_sprite_to_screen(op_digits),
+            (0xf, _, 0x1, 0xe) => self.add_vx_to_i(digit2),
+            (0xf, _, 0x3, 0x3) => self.store_bcd_of_vx_in_memory(digit2),
+            (0xf, _, 0x5, 0x5) => self.fill_memory_with_v0_to_vx(digit2),
+            (0xf, _, 0x6, 0x5) => self.fill_v0_to_vx_starting_at_i(digit2),
 
             _ => return,
         }
@@ -132,7 +121,7 @@ impl Chip8 {
 
     fn load_rom(&mut self, rom_binary: Vec<u8>) {
         let start_ram_address = START_RAM_ADDRESS as usize;
-        self.memory[start_ram_address..(start_ram_address + rom_binary.len())]
+        self.ram[start_ram_address..(start_ram_address + rom_binary.len())]
             .copy_from_slice(&rom_binary);
     }
 
@@ -188,7 +177,7 @@ impl Chip8 {
         for row in 0..sprite_height {
             // Read one byte from memory starting at I register + current row offset
             // Each byte represents 8 pixels (one row of the sprite)
-            let sprite_byte = &self.memory[i_register_value + row];
+            let sprite_byte = &self.ram[i_register_value + row];
             // println!("Sprite byte (row {:2}): {:08b}", row, sprite_byte);
 
             // Process each of the 8 bits in this byte (8 pixels per row)
@@ -472,7 +461,7 @@ impl Chip8 {
     /// 8xy5 - SUB Vx, Vy
     /// Set Vx = Vx - Vy, set VF = NOT borrow.
     /// If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx.
-    fn subtract_vx_with_vy(&mut self, x: u16, y: u16) {
+    fn subtract_vy_from_vx(&mut self, x: u16, y: u16) {
         let vx = self.v_registers[x as usize];
         let vy = self.v_registers[y as usize];
 
@@ -492,5 +481,118 @@ impl Chip8 {
         self.v_registers[0xF] = self.v_registers[x as usize] & 0x01;
 
         self.v_registers[x as usize] >>= 1;
+    }
+
+    /// 8xy7 - SUBN Vx, Vy
+    /// Set Vx = Vy - Vx, set VF = NOT borrow.
+    /// If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx is subtracted from Vy, and the results stored in Vx.
+    fn subtract_vx_from_vy(&mut self, x: u16, y: u16) {
+        let vx = self.v_registers[x as usize];
+        let vy = self.v_registers[y as usize];
+
+        if vy > vx {
+            self.v_registers[0xF] = 1;
+        } else {
+            self.v_registers[0xF] = 0;
+        }
+
+        self.v_registers[x as usize] = vy.wrapping_sub(vx);
+    }
+
+    /// 8xyE - SHL Vx {, Vy}
+    /// Set Vx = Vx SHL 1.
+    /// If the most-significant bit of Vx is 1, then VF is set to 1, otherwise to 0. Then Vx is multiplied by 2.
+    fn shl_vx(&mut self, x: u16) {
+        self.v_registers[0xF] = (self.v_registers[x as usize] >> 7) & 0x01;
+
+        self.v_registers[x as usize] <<= 1;
+    }
+
+    /// Fx1E - ADD I, Vx
+    /// Set I = I + Vx.
+    /// The values of I and Vx are added, and the results are stored in I.
+    fn add_vx_to_i(&mut self, x: u16) {
+        self.i_register = self
+            .i_register
+            .wrapping_add(self.v_registers[x as usize] as u16);
+    }
+
+    /// Fx33 - LD B, Vx
+    /// Store BCD representation of Vx in memory locations I, I+1, and I+2.
+    /// The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I,
+    /// the tens digit at location I+1, and the ones digit at location I+2.
+    fn store_bcd_of_vx_in_memory(&mut self, x: u16) {
+        let vx = self.v_registers[x as usize];
+        let mut bcd_vx: Vec<u8> = Chip8::extract_digits(vx);
+        if bcd_vx.len() < 3 {
+            let diff = 3 - bcd_vx.len();
+            for _ in 0..diff {
+                bcd_vx.insert(0, 0);
+            }
+        }
+
+        for (index, bcd) in bcd_vx.iter().enumerate() {
+            self.ram[index + self.i_register as usize] = *bcd;
+        }
+    }
+
+    /// Fx55 - LD [I], Vx
+    /// Store registers V0 through Vx in memory starting at location I.
+    /// The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
+    ///
+    /// More detailed info:
+    /// Store the values of registers V0 to VX inclusive in memory starting at address I.
+    /// I is set to I + X + 1 after operation
+    fn fill_memory_with_v0_to_vx(&mut self, x: u16) {
+        for v_register_index in 0..=x as usize {
+            self.ram[self.i_register as usize + v_register_index] =
+                self.v_registers[v_register_index];
+        }
+
+        self.i_register += x + 1;
+    }
+
+    /// Fx65 - LD Vx, [I]
+    /// Read registers V0 through Vx from memory starting at location I.
+    /// The interpreter reads values from memory starting at location I into registers V0 through Vx.
+    ///
+    /// More detailed info:
+    /// Fill registers V0 to VX inclusive with the values stored in memory starting at address I.
+    /// I is set to I + X + 1 after operation
+    fn fill_v0_to_vx_starting_at_i(&mut self, x: u16) {
+        for v_register_index in 0..=x as usize {
+            self.v_registers[v_register_index] =
+                self.ram[self.i_register as usize + v_register_index];
+        }
+
+        self.i_register += x + 1;
+    }
+
+    /// Extracts the decimal digits of a number in order (most to least significant).
+    ///
+    /// Given an input `n`, returns a vector of its digits, starting from the most significant digit.
+    /// For example, `extract_digits(153)` returns `[1, 5, 3]`.
+    /// If `n` is 0, returns `[0]`.
+    ///
+    /// # Example
+    /// ```
+    /// let digits = extract_digits(153);
+    /// assert_eq!(digits, vec![1, 5, 3]);
+    /// ```
+    fn extract_digits(mut n: u8) -> Vec<u8> {
+        if n == 0 {
+            return vec![0];
+        }
+
+        let mut digits: Vec<u8> = Vec::new();
+
+        while n > 0 {
+            digits.push(n % 10);
+            n /= 10;
+        }
+
+        digits.reverse();
+
+        return digits;
     }
 }
