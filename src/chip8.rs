@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use crate::constants::{
     CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN,
     SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS,
@@ -108,7 +110,7 @@ impl Chip8 {
             (0x9, _, _, 0) => self.skip_if_vx_ne_vy(digit2, digit3),
             (0xa, _, _, _) => self.set_i_register(op_code),
             (0xb, _, _, _) => self.jump_v0_addr(op_code),
-            (0xc, _, _, _) => self.rnd_vx_byte(digit2, ((digit3 << 4) | digit4) as u8),
+            (0xc, _, _, _) => self.rnd_vx_byte(op_code),
             (0xd, _, _, _) => self.draw_sprite_to_screen(op_digits),
             (0xe, _, 9, 0xe) => self.skp_vx(digit2),
             (0xe, _, 0xa, 1) => self.sknp_vx(digit2),
@@ -582,7 +584,7 @@ impl Chip8 {
     /// 0nnn - SYS addr
     /// Jump to a machine code routine at nnn. Ignored by most modern interpreters.
     fn sys_addr(&mut self, _op_code: u16) {
-        unimplemented!("SYS addr (0nnn) is not implemented");
+        return;
     }
 
     /// 5xy0 - SE Vx, Vy
@@ -609,14 +611,23 @@ impl Chip8 {
 
     /// Bnnn - JP V0, addr
     /// Jump to location nnn + V0.
-    fn jump_v0_addr(&mut self, _op_code: u16) {
-        unimplemented!("JP V0, addr (Bnnn) is not implemented");
+    /// The program counter is set to nnn plus the value of V0.
+    fn jump_v0_addr(&mut self, op_code: u16) {
+        self.pc = (op_code & 0x0fff) + self.v_registers[0] as u16;
     }
 
     /// Cxkk - RND Vx, byte
     /// Set Vx = random byte AND kk.
-    fn rnd_vx_byte(&mut self, _x: u16, _kk: u8) {
-        unimplemented!("RND Vx, byte (Cxkk) is not implemented");
+    /// The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk. 
+    /// The results are stored in Vx. See instruction 8xy2 for more information on AND.
+    fn rnd_vx_byte(&mut self, op_code: u16) {
+        let mut rng = rand::thread_rng();
+        let random_byte: u8 = rng.gen_range(0..=255);
+
+        let v_register_index = ((op_code & 0x0f00) >> 8) as usize;
+        let kk = (op_code & 0x00ff) as u8;
+
+        self.v_registers[v_register_index] = random_byte & kk;
     }
 
     /// Ex9E - SKP Vx
@@ -633,8 +644,9 @@ impl Chip8 {
 
     /// Fx07 - LD Vx, DT
     /// Set Vx = delay timer value.
-    fn ld_vx_dt(&mut self, _x: u16) {
-        unimplemented!("LD Vx, DT (Fx07) is not implemented");
+    /// The value of DT is placed into Vx.
+    fn ld_vx_dt(&mut self, x: u16) {
+        self.v_registers[x as usize] = self.delay_timer;
     }
 
     /// Fx0A - LD Vx, K
@@ -645,20 +657,23 @@ impl Chip8 {
 
     /// Fx15 - LD DT, Vx
     /// Set delay timer = Vx.
-    fn ld_dt_vx(&mut self, _x: u16) {
-        unimplemented!("LD DT, Vx (Fx15) is not implemented");
+    /// DT is set equal to the value of Vx.
+    fn ld_dt_vx(&mut self, x: u16) {
+        self.delay_timer = self.v_registers[x as usize];
     }
 
     /// Fx18 - LD ST, Vx
     /// Set sound timer = Vx.
-    fn ld_st_vx(&mut self, _x: u16) {
-        unimplemented!("LD ST, Vx (Fx18) is not implemented");
+    /// ST is set equal to the value of Vx.
+    fn ld_st_vx(&mut self, x: u16) {
+        self.sound_timer = self.v_registers[x as usize];
     }
 
     /// Fx29 - LD F, Vx
     /// Set I = location of sprite for digit Vx.
-    fn ld_f_vx(&mut self, _x: u16) {
-        unimplemented!("LD F, Vx (Fx29) is not implemented");
+    /// The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx. 
+    fn ld_f_vx(&mut self, x: u16) {
+        // self.i_register = 
     }
 
     /// Extracts the decimal digits of a number in order (most to least significant).
