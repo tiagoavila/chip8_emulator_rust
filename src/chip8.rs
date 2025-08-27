@@ -1,8 +1,7 @@
 use rand::Rng;
 
 use crate::constants::{
-    CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN, FONTSET,
-    FONTSET_SIZE, SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS,
+    CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN, FONT_SPRITES, FONT_SPRITES_SIZE, KEYBOARD_KEYS_COUNT, SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS
 };
 
 pub struct Chip8 {
@@ -18,6 +17,8 @@ pub struct Chip8 {
     pub needs_redraw: bool,
     pub debug_mode: bool, // Flag to indicate if the emulator is in debug mode
     pub instructions_executed: usize, // Count of instructions executed
+    pub keyboard: [bool; KEYBOARD_KEYS_COUNT],
+    pub halt: bool
 }
 
 impl Chip8 {
@@ -35,6 +36,8 @@ impl Chip8 {
             needs_redraw: false,
             debug_mode: false,
             instructions_executed: 0,
+            halt: false,
+            keyboard: [false; KEYBOARD_KEYS_COUNT]
         }
     }
 
@@ -633,14 +636,22 @@ impl Chip8 {
 
     /// Ex9E - SKP Vx
     /// Skip next instruction if key with the value of Vx is pressed.
-    fn skp_vx(&mut self, _x: u16) {
-        unimplemented!("SKP Vx (Ex9E) is not implemented");
+    /// Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
+    fn skp_vx(&mut self, x: u16) {
+        let vx = self.v_registers[x as usize] as usize;
+        if self.keyboard[vx] {
+            self.pc += 2;
+        }
     }
 
     /// ExA1 - SKNP Vx
     /// Skip next instruction if key with the value of Vx is not pressed.
-    fn sknp_vx(&mut self, _x: u16) {
-        unimplemented!("SKNP Vx (ExA1) is not implemented");
+    /// Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
+    fn sknp_vx(&mut self, x: u16) {
+        let vx = self.v_registers[x as usize] as usize;
+        if !self.keyboard[vx] {
+            self.pc += 2;
+        }
     }
 
     /// Fx07 - LD Vx, DT
@@ -652,8 +663,20 @@ impl Chip8 {
 
     /// Fx0A - LD Vx, K
     /// Wait for a key press, store the value of the key in Vx.
-    fn ld_vx_k(&mut self, _x: u16) {
-        unimplemented!("LD Vx, K (Fx0A) is not implemented");
+    /// All execution stops until a key is pressed, then the value of that key is stored in Vx.
+    fn ld_vx_k(&mut self, x: u16) {
+        let mut key_was_pressed = false;
+        for key in 0..self.keyboard.len() {
+            if self.keyboard[key] == true {
+                self.v_registers[x as usize] = key as u8;
+                key_was_pressed = true;
+            }
+        }
+        
+        // Redo this instruction until a key is pressed 
+        if !key_was_pressed {
+            self.pc -= 2;
+        }
     }
 
     /// Fx15 - LD DT, Vx
@@ -726,6 +749,6 @@ impl Chip8 {
     }
 
     fn load_font_slices(&mut self) {
-        self.ram[0x0..FONTSET_SIZE].copy_from_slice(FONTSET.as_slice());
+        self.ram[0x0..FONT_SPRITES_SIZE].copy_from_slice(FONT_SPRITES.as_slice());
     }
 }

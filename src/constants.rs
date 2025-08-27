@@ -9,9 +9,9 @@ pub const START_RAM_ADDRESS: u16 = 0x200;
 pub const CLEANED_SCREEN: [bool; SCREEN_WIDTH * SCREEN_HEIGHT] =
     [false; SCREEN_WIDTH * SCREEN_HEIGHT];
 
-pub const FONTSET_SIZE: usize = 80;
+pub const FONT_SPRITES_SIZE: usize = 80;
 
-pub const FONTSET: [u8; FONTSET_SIZE] = [
+pub const FONT_SPRITES: [u8; FONT_SPRITES_SIZE] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
     0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
@@ -29,3 +29,5 @@ pub const FONTSET: [u8; FONTSET_SIZE] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+
+pub const KEYBOARD_KEYS_COUNT: usize = 16;
