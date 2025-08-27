@@ -1,8 +1,8 @@
 use rand::Rng;
 
 use crate::constants::{
-    CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN,
-    SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS,
+    CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN, FONTSET,
+    FONTSET_SIZE, SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS,
 };
 
 pub struct Chip8 {
@@ -41,6 +41,7 @@ impl Chip8 {
     pub fn start(rom_binary: Vec<u8>) -> Self {
         let mut chip8 = Self::new();
         chip8.load_rom(rom_binary);
+        chip8.load_font_slices();
         return chip8;
     }
 
@@ -618,7 +619,7 @@ impl Chip8 {
 
     /// Cxkk - RND Vx, byte
     /// Set Vx = random byte AND kk.
-    /// The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk. 
+    /// The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk.
     /// The results are stored in Vx. See instruction 8xy2 for more information on AND.
     fn rnd_vx_byte(&mut self, op_code: u16) {
         let mut rng = rand::thread_rng();
@@ -671,9 +672,29 @@ impl Chip8 {
 
     /// Fx29 - LD F, Vx
     /// Set I = location of sprite for digit Vx.
-    /// The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx. 
+    ///
+    /// The Fx29 instruction sets the I register to the memory address of the sprite
+    /// representing the hexadecimal digit stored in Vx. Each digit (0-F) has a corresponding
+    /// 5-byte sprite stored in memory, starting at address 0x000. The font sprites are
+    /// stored sequentially from 0x000 to 0x1FF.
+    ///
+    /// # Font Sprite Memory Layout
+    /// - Each digit sprite is 5 bytes long.
+    /// - The sprite for digit N is located at memory address: N * 5.
+    /// - The font set occupies the memory range 0x000 to 0x1FF.
+    ///
+    /// # Example
+    /// ```
+    /// // Suppose Vx contains 0xA (decimal 10)
+    /// chip8.v_registers[0] = 0xA;
+    /// chip8.ld_f_vx(0);
+    /// assert_eq!(chip8.i_register, 0x32); // 0xA * 5 = 0x32
+    /// ```
+    ///
+    /// This instruction is typically used before drawing a digit sprite to the screen.
     fn ld_f_vx(&mut self, x: u16) {
-        // self.i_register = 
+        let vx = self.v_registers[x as usize];
+        self.i_register = (vx * 5) as u16;
     }
 
     /// Extracts the decimal digits of a number in order (most to least significant).
@@ -702,5 +723,9 @@ impl Chip8 {
         digits.reverse();
 
         return digits;
+    }
+
+    fn load_font_slices(&mut self) {
+        self.ram[0x0..FONTSET_SIZE].copy_from_slice(FONTSET.as_slice());
     }
 }
