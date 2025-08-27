@@ -10,6 +10,7 @@ use crate::constants::{SCREEN_HEIGHT, SCREEN_SCALE_FACTOR, SCREEN_WIDTH};
 
 mod chip8;
 mod constants;
+mod chip8_util;
 
 /// Command-line arguments for the Chip-8 Emulator
 #[derive(Parser, Debug)]
