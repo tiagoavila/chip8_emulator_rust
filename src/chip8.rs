@@ -47,14 +47,13 @@ impl Chip8 {
     }
 
     pub fn tick(&mut self) {
-        self.needs_redraw = false;
-
         //FETCH
         let op_code = self.fetch();
+        Chip8Util::print_instruction(self, op_code);
 
-        if self.debug_mode {
-            Chip8Util::print_instruction(self, op_code);
-        }
+        // if self.debug_mode {
+        //     Chip8Util::print_instruction(self, op_code);
+        // }
 
         //DECODE
         //EXECUTE

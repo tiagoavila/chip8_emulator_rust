@@ -1,3 +1,5 @@
+use minifb::Key;
+
 pub const CHIP8_RAM_MEMORY_SIZE: usize = 4096;
 pub const CHIP8_STACK_MEMORY_SIZE: usize = 16;
 pub const CHIP8_REGISTER_COUNT: usize = 16;
@@ -31,3 +33,31 @@ pub const FONT_SPRITES: [u8; FONT_SPRITES_SIZE] = [
 ];
 
 pub const KEYBOARD_KEYS_COUNT: usize = 16;
+
+/// Mapping of physical keyboard keys to Chip-8 hexadecimal keypad codes.
+/// Keyboard     ->     Chip-8 Keyboard
+/// 1 2 3 4      ->     1 2 3 C
+/// Q W E R      ->     4 5 6 D
+/// A S D F      ->     7 8 9 E
+/// Z X C V      ->     A 0 B F
+pub const KEYBOARD_CODES: [(Key, u8); KEYBOARD_KEYS_COUNT] = [
+    (Key::Key1, 0x1),
+    (Key::Key2, 0x2),
+    (Key::Key3, 0x3),
+    (Key::Key4, 0xC),
+
+    (Key::Q, 0x4),
+    (Key::W, 0x5),
+    (Key::E, 0x6),
+    (Key::R, 0xD),
+
+    (Key::A, 0x7),
+    (Key::S, 0x8),
+    (Key::D, 0x9),
+    (Key::F, 0xE),
+
+    (Key::Z, 0xA),
+    (Key::X, 0x0),
+    (Key::C, 0xB),
+    (Key::V, 0xF)
+];

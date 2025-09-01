@@ -1,16 +1,18 @@
 use std::{
     fs::File,
     io::{self, Read},
+    time::{Duration, Instant},
 };
 
 use clap::Parser;
 use minifb::{Key, Window, WindowOptions};
 
-use crate::constants::{SCREEN_HEIGHT, SCREEN_SCALE_FACTOR, SCREEN_WIDTH};
+use crate::constants::{KEYBOARD_CODES, SCREEN_HEIGHT, SCREEN_SCALE_FACTOR, SCREEN_WIDTH};
 
 mod chip8;
-mod constants;
 mod chip8_util;
+mod constants;
+mod user_input;
 
 /// Command-line arguments for the Chip-8 Emulator
 #[derive(Parser, Debug)]
@@ -39,7 +41,10 @@ fn main() {
 
     // let binary = read_rom("files/roms/IBM_Logo.ch8").unwrap();
     // let binary = read_rom("files/roms/chip8-logo.ch8").unwrap();
-    let binary = read_rom("files/roms/3-corax+.ch8").unwrap();
+    // let binary = read_rom("files/roms/3-corax+.ch8").unwrap();
+    // let binary = read_rom("files/roms/5-quirks.ch8").unwrap();
+    // let binary = read_rom("files/roms/4-flags.ch8").unwrap();
+    let binary = read_rom("files/roms/PONG").unwrap();
 
     let mut chip8 = chip8::Chip8::start(binary);
 
@@ -64,9 +69,54 @@ fn main() {
 }
 
 fn run_normal_mode(buffer: &mut Vec<u32>, chip8: &mut chip8::Chip8, window: &mut Window) {
+    let mut is_running = true;
+    let mut last_timer_update = Instant::now();
+    let frame_duration = Duration::from_millis(1000 / 60); // 60 FPS
+
     // Normal mode loop
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        chip8.tick();
+        chip8.keyboard.fill(false);
+        chip8.needs_redraw = false;
+
+        // Check pressed keys
+        if let Some(key) = user_input::get_pressed_key(window) {
+            println!("Key pressed: {:#X}", key);
+            chip8.keyboard[key as usize] = true;
+            println!("Keyboard state: {:?}", chip8.keyboard);
+        }
+
+        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::Yes) {
+            is_running = !is_running;
+            if is_running {
+                println!("Resuming execution");
+            } else {
+                println!("Pausing execution");
+            }
+        }
+
+        if is_running {
+            // 2. Run multiple CPU cycles per frame
+            for _ in 0..10 {
+                // Adjust: 8–12 is common
+                chip8.tick();
+            }
+
+            // 3. Update timers at ~60Hz
+            if last_timer_update.elapsed() >= frame_duration {
+                if chip8.delay_timer > 0 {
+                    chip8.delay_timer -= 1;
+                }
+                if chip8.sound_timer > 0 {
+                    chip8.sound_timer -= 1;
+                    // play beep here
+                }
+                last_timer_update = Instant::now();
+            }
+            chip8.tick();
+        }
+
+        // Check released keys
+        // user_input::check_released_keys(window, &mut chip8.keyboard);
 
         draw_screen_if_needed(buffer, chip8);
 
@@ -74,7 +124,12 @@ fn run_normal_mode(buffer: &mut Vec<u32>, chip8: &mut chip8::Chip8, window: &mut
     }
 }
 
-fn run_debug_mode(instruction_count: usize, buffer: &mut Vec<u32>, chip8: &mut chip8::Chip8, window: &mut Window) {
+fn run_debug_mode(
+    instruction_count: usize,
+    buffer: &mut Vec<u32>,
+    chip8: &mut chip8::Chip8,
+    window: &mut Window,
+) {
     // Debug mode loop
     let mut space_pressed = false;
 
@@ -88,7 +143,7 @@ fn run_debug_mode(instruction_count: usize, buffer: &mut Vec<u32>, chip8: &mut c
     for _ in 0..instruction_count {
         chip8.tick();
     }
-    
+
     chip8.enable_debug_mode(instruction_count);
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
