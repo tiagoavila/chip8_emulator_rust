@@ -69,3 +69,11 @@ chip8_emulator_rust/
 
 ## ROMs
 Sample CHIP-8 ROMs are included in the `files/roms/` directory. You can find more online or create your own.
+
+
+## Useful Links
+
+- **Chip-8 Technical Reference v1.0**: [http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.5](http://devernay.free.fr/hacks/chip8/C8TECH10.HTM#2.5)
+- **Mastering Chip-8**: [https://github.com/mattmikolay/chip-8/wiki/Mastering-CHIP%E2%80%908](https://github.com/mattmikolay/chip-8/wiki/Mastering-CHIP%E2%80%908)
+- **Test suite**: [https://github.com/Timendus/chip8-test-suite?tab=readme-ov-file](https://github.com/Timendus/chip8-test-suite?tab=readme-ov-file)
+- **An Introduction to Chip-8 Emulation using the Rust Programming Language**: [https://github.com/aquova/chip8-book](https://github.com/aquova/chip8-book)
