@@ -1,8 +1,13 @@
 use rand::Rng;
 
-use crate::{chip8_util::Chip8Util, constants::{
-    CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN, FONT_SPRITES, FONT_SPRITES_SIZE, KEYBOARD_KEYS_COUNT, SCREEN_HEIGHT, SCREEN_WIDTH, START_RAM_ADDRESS
-}};
+use crate::{
+    chip8_util::Chip8Util,
+    constants::{
+        CHIP8_RAM_MEMORY_SIZE, CHIP8_REGISTER_COUNT, CHIP8_STACK_MEMORY_SIZE, CLEANED_SCREEN,
+        FONT_SPRITES, FONT_SPRITES_SIZE, KEYBOARD_KEYS_COUNT, SCREEN_HEIGHT, SCREEN_WIDTH,
+        START_RAM_ADDRESS,
+    },
+};
 
 pub struct Chip8 {
     pub ram: [u8; CHIP8_RAM_MEMORY_SIZE],
@@ -21,6 +26,7 @@ pub struct Chip8 {
 }
 
 impl Chip8 {
+    /// Creates a new instance of the Chip-8 emulator with initialized memory and registers.
     pub fn new() -> Self {
         Self {
             ram: [0; CHIP8_RAM_MEMORY_SIZE],
@@ -35,10 +41,11 @@ impl Chip8 {
             needs_redraw: false,
             debug_mode: false,
             instructions_executed: 0,
-            keyboard: [false; KEYBOARD_KEYS_COUNT]
+            keyboard: [false; KEYBOARD_KEYS_COUNT],
         }
     }
 
+    /// Start the Chip-8 emulator with the provided ROM binary data.
     pub fn start(rom_binary: Vec<u8>) -> Self {
         let mut chip8 = Self::new();
         chip8.load_rom(rom_binary);
@@ -46,14 +53,14 @@ impl Chip8 {
         return chip8;
     }
 
+    /// Executes a single tick of the Chip-8 emulator, representing one cycle.
     pub fn tick(&mut self) {
         //FETCH
         let op_code = self.fetch();
-        Chip8Util::print_instruction(self, op_code);
 
-        // if self.debug_mode {
-        //     Chip8Util::print_instruction(self, op_code);
-        // }
+        if self.debug_mode {
+            Chip8Util::print_instruction(self, op_code);
+        }
 
         //DECODE
         //EXECUTE
@@ -128,26 +135,51 @@ impl Chip8 {
         }
     }
 
+    /// Enables debug mode, allowing step-by-step execution and inspection of the emulator state.
     pub fn enable_debug_mode(&mut self, instructions_executed: usize) {
         self.debug_mode = true;
         self.instructions_executed = instructions_executed;
     }
 
+    /// Updates the timers for the Chip-8 emulator.
+    /// Chip-8 provides 2 timers, a delay timer and a sound timer.
+    /// The delay timer is active whenever the delay timer register (DT) is non-zero. This timer does nothing more than subtract 1 from the value of DT at a rate of 60Hz. When DT reaches 0, it deactivates.
+    /// The sound timer is active whenever the sound timer register (ST) is non-zero. This timer also decrements at a rate of 60Hz, however, as long as ST's value is greater than zero, the Chip-8 buzzer will sound. When ST reaches zero, the sound timer deactivates.
+    /// The sound produced by the Chip-8 interpreter has only one tone. The frequency of this tone is decided by the author of the interpreter.
+    pub fn update_timers(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
+    }
+
+    /// Resets the keyboard state by setting all keys to unpressed (false).
+    pub fn reset_keyboard(&mut self) {
+        self.keyboard.fill(false);
+    }
+
+    /// Loads the ROM binary data into the emulator's memory.
     fn load_rom(&mut self, rom_binary: Vec<u8>) {
         let start_ram_address = START_RAM_ADDRESS as usize;
         self.ram[start_ram_address..(start_ram_address + rom_binary.len())]
             .copy_from_slice(&rom_binary);
     }
 
+    /// Sets the I register to the lowest 12 bits of the opcode.
     fn set_i_register(&mut self, op_code: u16) {
         self.i_register = op_code & 0x0fff
     }
 
+    /// Clears the display and sets the redraw flag.
     fn clear_screen(&mut self) {
         self.screen = CLEANED_SCREEN;
         self.needs_redraw = true;
     }
 
+    /// Sets the value of a V register to the lowest 8 bits of the opcode.
     fn set_v_register(&mut self, op_code: u16) {
         let v_register_index = ((op_code & 0x0f00) >> 8) as usize;
         let nn = (op_code & 0x00ff) as u8;
@@ -169,6 +201,7 @@ impl Chip8 {
     // Set VF to 1 if any set pixels are changed to unset, and 0 otherwise
     // Chip-8’s sprites are always 8 pixels wide, but can be a variable number of pixels tall, from 1 to 16.
     // This is specified in the final digit of the opcode.
+    /// Draws a sprite at the coordinates specified by VX and VY with a given height, updating the screen and VF for collision.
     fn draw_sprite_to_screen(&mut self, digits: (u16, u16, u16, u16)) {
         let vx_register = digits.1 as usize;
         let vy_register = digits.2 as usize;
@@ -226,6 +259,7 @@ impl Chip8 {
         self.needs_redraw = true;
     }
 
+    /// Sets the program counter to the address specified by the opcode.
     fn jump(&mut self, op_code: u16) {
         self.pc = op_code & 0x0fff;
     }
@@ -275,6 +309,7 @@ impl Chip8 {
     /// 2nnn - CALL addr
     /// Call subroutine at nnn.
     /// The interpreter puts the current PC on the top of the stack and increments the stack pointer. The PC is then set to nnn.
+    /// Calls a subroutine at the address specified by the opcode, pushing the current PC to the stack.
     fn call_subroutine(&mut self, op_code: u16) {
         self.stack[self.stack_pointer] = self.pc;
         self.stack_pointer += 1;
@@ -283,6 +318,7 @@ impl Chip8 {
 
     /// 00EE - Return from a subroutine.
     /// The interpreter subtracts 1 from the stack pointer and sets the program counter to the address at the top of the stack.
+    /// Returns from a subroutine by popping the address from the stack into the program counter.
     fn return_from_subroutine(&mut self) {
         self.stack_pointer -= 1;
         self.pc = self.stack[self.stack_pointer];
@@ -295,6 +331,7 @@ impl Chip8 {
     ///
     /// * `x` - The index of the Vx register to store the value in.
     /// * `y` - The index of the Vy register to read the value from.
+    /// Stores the value of register Vy in register Vx.
     fn store_vy_in_vx(&mut self, x: u16, y: u16) {
         self.v_registers[x as usize] = self.v_registers[y as usize];
     }
@@ -305,6 +342,7 @@ impl Chip8 {
     /// A bitwise OR compares the corrseponding bits from two values, and if either bit is 1,
     /// then the same bit in the result is also 1. Otherwise, it is 0.
     /// The | operator compares each bit of the left and right operands.
+    /// Sets Vx to Vx OR Vy (bitwise).
     fn set_vx_with_vx_or_vy(&mut self, x: u16, y: u16) {
         self.v_registers[x as usize] |= self.v_registers[y as usize];
     }
@@ -314,6 +352,7 @@ impl Chip8 {
     /// Performs a bitwise AND on the values of Vx and Vy, then stores the result in Vx.
     /// A bitwise AND compares the corrseponding bits from two values, and if both bits are 1,
     /// then the same bit in the result is also 1. Otherwise, it is 0.
+    /// Sets Vx to Vx AND Vy (bitwise).
     fn set_vx_with_vx_and_vy(&mut self, x: u16, y: u16) {
         self.v_registers[x as usize] &= self.v_registers[y as usize];
     }
@@ -323,6 +362,7 @@ impl Chip8 {
     /// Performs a bitwise exclusive OR on the values of Vx and Vy, then stores the result in Vx.
     /// An exclusive OR compares the corrseponding bits from two values, and if the bits are not both the same,
     /// then the corresponding bit in the result is set to 1. Otherwise, it is 0.
+    /// Sets Vx to Vx XOR Vy (bitwise).
     fn set_vx_with_vx_xor_vy(&mut self, x: u16, y: u16) {
         self.v_registers[x as usize] ^= self.v_registers[y as usize];
     }
@@ -331,6 +371,7 @@ impl Chip8 {
     /// Set Vx = Vx + Vy, set VF = carry.
     /// The values of Vx and Vy are added together. If the result is greater than 8 bits (i.e., > 255,)
     /// VF is set to 1, otherwise 0. Only the lowest 8 bits of the result are kept, and stored in Vx.
+    /// Adds Vy to Vx, sets VF to 1 if there's a carry, 0 otherwise.
     fn add_vx_with_vy(&mut self, x: u16, y: u16) {
         let vx = self.v_registers[x as usize];
         let vy = self.v_registers[y as usize];
@@ -349,6 +390,7 @@ impl Chip8 {
     /// 8xy5 - SUB Vx, Vy
     /// Set Vx = Vx - Vy, set VF = NOT borrow.
     /// If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx.
+    /// Subtracts Vy from Vx, sets VF to 1 if no borrow, 0 otherwise.
     fn subtract_vy_from_vx(&mut self, x: u16, y: u16) {
         let vx = self.v_registers[x as usize];
         let vy = self.v_registers[y as usize];
@@ -365,6 +407,7 @@ impl Chip8 {
     /// 8xy6 - SHR Vx {, Vy}
     /// Set Vx = Vx SHR 1.
     /// If the least-significant bit of Vx is 1, then VF is set to 1, otherwise 0. Then Vx is divided by 2.
+    /// Shifts Vx right by one, stores least significant bit in VF.
     fn shr_vx(&mut self, x: u16) {
         self.v_registers[0xF] = self.v_registers[x as usize] & 0x01;
 
@@ -374,6 +417,7 @@ impl Chip8 {
     /// 8xy7 - SUBN Vx, Vy
     /// Set Vx = Vy - Vx, set VF = NOT borrow.
     /// If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx is subtracted from Vy, and the results stored in Vx.
+    /// Sets Vx to Vy minus Vx, sets VF to 1 if no borrow, 0 otherwise.
     fn subtract_vx_from_vy(&mut self, x: u16, y: u16) {
         let vx = self.v_registers[x as usize];
         let vy = self.v_registers[y as usize];
@@ -390,6 +434,7 @@ impl Chip8 {
     /// 8xyE - SHL Vx {, Vy}
     /// Set Vx = Vx SHL 1.
     /// If the most-significant bit of Vx is 1, then VF is set to 1, otherwise to 0. Then Vx is multiplied by 2.
+    /// Shifts Vx left by one, stores most significant bit in VF.
     fn shl_vx(&mut self, x: u16) {
         self.v_registers[0xF] = (self.v_registers[x as usize] >> 7) & 0x01;
 
@@ -399,6 +444,7 @@ impl Chip8 {
     /// Fx1E - ADD I, Vx
     /// Set I = I + Vx.
     /// The values of I and Vx are added, and the results are stored in I.
+    /// Adds Vx to the I register.
     fn add_vx_to_i(&mut self, x: u16) {
         self.i_register = self
             .i_register
@@ -409,6 +455,7 @@ impl Chip8 {
     /// Store BCD representation of Vx in memory locations I, I+1, and I+2.
     /// The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I,
     /// the tens digit at location I+1, and the ones digit at location I+2.
+    /// Stores the BCD representation of Vx in memory at I, I+1, and I+2.
     fn store_bcd_of_vx_in_memory(&mut self, x: u16) {
         let vx = self.v_registers[x as usize];
         let mut bcd_vx: Vec<u8> = Chip8Util::extract_digits(vx);
@@ -431,6 +478,7 @@ impl Chip8 {
     /// More detailed info:
     /// Store the values of registers V0 to VX inclusive in memory starting at address I.
     /// I is set to I + X + 1 after operation
+    /// Stores registers V0 through Vx in memory starting at address I, then updates I.
     fn fill_memory_with_v0_to_vx(&mut self, x: u16) {
         for v_register_index in 0..=x as usize {
             self.ram[self.i_register as usize + v_register_index] =
@@ -447,6 +495,7 @@ impl Chip8 {
     /// More detailed info:
     /// Fill registers V0 to VX inclusive with the values stored in memory starting at address I.
     /// I is set to I + X + 1 after operation
+    /// Fills V0 through Vx with values from memory starting at address I, then updates I.
     fn fill_v0_to_vx_starting_at_i(&mut self, x: u16) {
         for v_register_index in 0..=x as usize {
             self.v_registers[v_register_index] =
@@ -458,6 +507,7 @@ impl Chip8 {
 
     /// 0nnn - SYS addr
     /// Jump to a machine code routine at nnn. Ignored by most modern interpreters.
+    /// Jumps to a machine code routine at nnn (ignored by most interpreters).
     fn sys_addr(&mut self, _op_code: u16) {
         return;
     }
@@ -465,6 +515,7 @@ impl Chip8 {
     /// 5xy0 - SE Vx, Vy
     /// Skip next instruction if Vx = Vy.
     /// The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.
+    /// Skips the next instruction if Vx equals Vy.
     fn skip_if_vx_eq_vy(&mut self, x: u16, y: u16) {
         let vx = self.v_registers[x as usize];
         let vy = self.v_registers[y as usize];
@@ -476,6 +527,7 @@ impl Chip8 {
     /// 9xy0 - SNE Vx, Vy
     /// Skip next instruction if Vx != Vy.
     /// The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.    
+    /// Skips the next instruction if Vx does not equal Vy.
     fn skip_if_vx_ne_vy(&mut self, x: u16, y: u16) {
         let vx = self.v_registers[x as usize];
         let vy = self.v_registers[y as usize];
@@ -487,6 +539,7 @@ impl Chip8 {
     /// Bnnn - JP V0, addr
     /// Jump to location nnn + V0.
     /// The program counter is set to nnn plus the value of V0.
+    /// Jumps to the address nnn plus V0.
     fn jump_v0_addr(&mut self, op_code: u16) {
         self.pc = (op_code & 0x0fff) + self.v_registers[0] as u16;
     }
@@ -495,6 +548,7 @@ impl Chip8 {
     /// Set Vx = random byte AND kk.
     /// The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk.
     /// The results are stored in Vx. See instruction 8xy2 for more information on AND.
+    /// Sets Vx to a random byte ANDed with kk.
     fn rnd_vx_byte(&mut self, op_code: u16) {
         let mut rng = rand::thread_rng();
         let random_byte: u8 = rng.gen_range(0..=255);
@@ -508,6 +562,7 @@ impl Chip8 {
     /// Ex9E - SKP Vx
     /// Skip next instruction if key with the value of Vx is pressed.
     /// Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
+    /// Skips the next instruction if the key in Vx is pressed.
     fn skp_vx(&mut self, x: u16) {
         let vx = self.v_registers[x as usize] as usize;
         if self.keyboard[vx] {
@@ -518,6 +573,7 @@ impl Chip8 {
     /// ExA1 - SKNP Vx
     /// Skip next instruction if key with the value of Vx is not pressed.
     /// Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
+    /// Skips the next instruction if the key in Vx is not pressed.
     fn sknp_vx(&mut self, x: u16) {
         let vx = self.v_registers[x as usize] as usize;
         if !self.keyboard[vx] {
@@ -543,8 +599,8 @@ impl Chip8 {
                 key_was_pressed = true;
             }
         }
-        
-        // Redo this instruction until a key is pressed 
+
+        // Redo this instruction until a key is pressed
         if !key_was_pressed {
             self.pc -= 2;
         }
@@ -591,6 +647,7 @@ impl Chip8 {
         self.i_register = (vx * 5) as u16;
     }
 
+    /// Loads the font sprites into memory at the start of RAM.
     fn load_font_slices(&mut self) {
         self.ram[0x0..FONT_SPRITES_SIZE].copy_from_slice(FONT_SPRITES.as_slice());
     }

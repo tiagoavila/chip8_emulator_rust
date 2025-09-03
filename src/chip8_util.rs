@@ -1,3 +1,5 @@
+use std::{fs::File, io::{self, Read}};
+
 use crate::chip8::Chip8;
 
 pub struct Chip8Util;
@@ -155,5 +157,23 @@ impl Chip8Util {
         digits.reverse();
 
         return digits;
+    }
+
+    /// Reads a ROM file from the specified path and returns its contents as a vector of bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read.
+    pub fn read_rom(file_path: &str) -> io::Result<Vec<u8>> {
+        // Open the file
+        let file = File::open(file_path)?;
+        let mut reader = io::BufReader::new(file);
+
+        let mut buffer: Vec<u8> = Vec::new();
+
+        reader.read_to_end(&mut buffer)?;
+        // Collect the lines into a vector
+        // let lines: Vec<String> = buffer.iter().collect();
+        Ok(buffer)
     }
 }
