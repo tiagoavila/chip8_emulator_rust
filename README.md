@@ -1,3 +1,4 @@
+
 <p align="center">
   <img src="files/images/logo.png" alt="CHIP-8 Rust Logo" width="300"/>
 </p>
@@ -5,6 +6,8 @@
 # CHIP-8 Emulator in Rust
 
 This project is a CHIP-8 emulator/interpreter written in Rust. CHIP-8 is a simple, interpreted programming language, originally developed in the 1970s, commonly used to teach emulation and low-level programming concepts.
+
+> **Inspired by**: This project was motivated by [Austin Henley's "Challenging projects every programmer should try"](https://austinhenley.com/blog/challengingprojects.html), which highlights text editor implementation as one of the most educational programming projects. Building a text editor from scratch teaches fundamental concepts about data structures, cursor behavior, and efficient text manipulation that every programmer should understand.
 
 ## Features
 - Accurate CHIP-8 instruction set implementation
